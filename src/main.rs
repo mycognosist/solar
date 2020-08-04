@@ -12,6 +12,8 @@ extern crate slice_deque;
 extern crate serde;
 extern crate anyhow;
 extern crate toml;
+#[macro_use]
+extern crate jsonrpc_client_core;
 
 use async_std::fs::File;
 use async_std::io::ReadExt;
@@ -48,6 +50,10 @@ struct Opt {
     /// Run sensor
     #[structopt(short, long)]
     sensor: Option<bool>,
+
+    /// Log to OLED display
+    #[structopt(short, long)]
+    oled: Option<bool>,
 }
 
 mod actors;
@@ -74,7 +80,8 @@ pub static CONFIG: OnceCell<Config> = OnceCell::new();
 async fn main() -> Result<()> {
     let opt = Opt::from_args();
 
-    println!("🌞 Solar {}", env!("SOLAR_VERSION"));
+    let solar_up = format!("🌞 Solar {}", env!("SOLAR_VERSION"));
+    println!("{}", solar_up);
 
     let base_path = opt
         .data
@@ -84,6 +91,7 @@ async fn main() -> Result<()> {
     let lan_discovery = opt.lan.unwrap_or(false);
     let listen = format!("0.0.0.0:{}", rpc_port);
     let sensor = opt.sensor.unwrap_or(false);
+    let oled = opt.oled.unwrap_or(false);
 
     env_logger::init();
     log::set_max_level(log::LevelFilter::max());
@@ -169,7 +177,12 @@ async fn main() -> Result<()> {
         Broker::spawn(actors::sensor::actor(owned_id.clone()));
     }
 
+    if oled {
+        Broker::spawn(actors::oled::actor(solar_up));
+    }
+
     Broker::spawn(actors::tcp_server::actor(owned_id.clone(), listen));
+
     if lan_discovery {
         Broker::spawn(actors::lan_discovery::actor(owned_id.clone(), RPC_PORT));
     }

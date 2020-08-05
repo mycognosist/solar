@@ -4,7 +4,6 @@
 extern crate futures;
 #[macro_use]
 extern crate log;
-extern crate plotters;
 extern crate procfs;
 extern crate sha2;
 extern crate slice_deque;
@@ -47,10 +46,6 @@ struct Opt {
     #[structopt(short, long)]
     lan: Option<bool>,
 
-    /// Run sensor
-    #[structopt(short, long)]
-    sensor: Option<bool>,
-
     /// Log to OLED display
     #[structopt(short, long)]
     oled: Option<bool>,
@@ -80,8 +75,7 @@ pub static CONFIG: OnceCell<Config> = OnceCell::new();
 async fn main() -> Result<()> {
     let opt = Opt::from_args();
 
-    let solar_up = format!("🌞 Solar {}", env!("SOLAR_VERSION"));
-    println!("{}", solar_up);
+    println!("🌞 Solar {}", env!("SOLAR_VERSION"));
 
     let base_path = opt
         .data
@@ -90,7 +84,6 @@ async fn main() -> Result<()> {
     let rpc_port = opt.port.unwrap_or(RPC_PORT);
     let lan_discovery = opt.lan.unwrap_or(false);
     let listen = format!("0.0.0.0:{}", rpc_port);
-    let sensor = opt.sensor.unwrap_or(false);
     let oled = opt.oled.unwrap_or(false);
 
     env_logger::init();
@@ -173,12 +166,8 @@ async fn main() -> Result<()> {
 
     Broker::spawn(actors::ctrlc::actor());
 
-    if sensor {
-        Broker::spawn(actors::sensor::actor(owned_id.clone()));
-    }
-
     if oled {
-        Broker::spawn(actors::oled::actor(solar_up));
+        Broker::spawn(actors::oled::actor("Solar deployed".to_string()));
     }
 
     Broker::spawn(actors::tcp_server::actor(owned_id.clone(), listen));

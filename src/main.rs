@@ -167,7 +167,7 @@ async fn main() -> Result<()> {
     Broker::spawn(actors::ctrlc::actor());
 
     if oled {
-        Broker::spawn(actors::oled::actor("Solar deployed".to_string()));
+        Broker::spawn(actors::oled::actor());
     }
 
     Broker::spawn(actors::tcp_server::actor(owned_id.clone(), listen));

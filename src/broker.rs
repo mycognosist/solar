@@ -26,7 +26,8 @@ pub type ChMsgRecv = mpsc::UnboundedReceiver<BrokerMessage>;
 
 #[derive(PartialEq, Debug)]
 pub enum Destination {
-    Actor(usize),
+    //Actor(usize),
+    Actor(String),
     Broadcast,
 }
 
@@ -53,6 +54,7 @@ impl BrokerEvent {
 #[derive(Debug)]
 pub struct BrokerEndpoint {
     pub actor_id: usize,
+    pub actor_name: String,
     pub ch_terminate: ChSigSend,
     pub ch_terminated: ChSigRecv,
 
@@ -62,6 +64,7 @@ pub struct BrokerEndpoint {
 #[derive(Debug)]
 pub struct ActorEndpoint {
     pub actor_id: usize,
+    pub actor_name: String,
 
     pub ch_broker: ChBrokerSend,
     pub ch_terminate: ChSigRecv,
@@ -95,7 +98,7 @@ impl Broker {
     pub async fn register(&mut self, name: &str, msg_notify: bool) -> Result<ActorEndpoint> {
         self.last_actor_id += 1;
 
-        trace!(target:"solar-actor","registering actor {}={}", self.last_actor_id, name);
+        trace!(target:"solar-actor", "registering actor {}={}", self.last_actor_id, name);
 
         let (terminate_sender, terminate_receiver) = oneshot::channel::<Void>();
         let (terminated_sender, terminated_receiver) = oneshot::channel::<Void>();
@@ -109,12 +112,14 @@ impl Broker {
 
         let broker_endpoint = BrokerEndpoint {
             actor_id: self.last_actor_id,
+            actor_name: name.to_string(),
             ch_terminate: terminate_sender,
             ch_terminated: terminated_receiver,
             ch_msg: msg_sender,
         };
         let actor_endpoint = ActorEndpoint {
             actor_id: self.last_actor_id,
+            actor_name: name.to_string(),
             ch_broker: self.sender.clone(),
             ch_terminate: terminate_receiver,
             ch_terminated: terminated_sender,
@@ -162,12 +167,13 @@ impl Broker {
                     actors.insert(actor.actor_id, actor);
                 }
                 BrokerEvent::Disconnect { actor_id } => {
-                    trace!(target:"solar-actor","Unregistering actor {}", actor_id);
+                    trace!(target:"solar-actor", "Unregistering actor {}", actor_id);
                     actors.remove(&actor_id);
                 }
                 BrokerEvent::Message { to, msg } => {
                     for actor in actors.values_mut() {
-                        if to == Destination::Actor(actor.actor_id) || to == Destination::Broadcast
+                        if to == Destination::Actor(actor.actor_name.clone())
+                            || to == Destination::Broadcast
                         {
                             if let Some(ch) = &mut actor.ch_msg {
                                 let _ = ch.send(msg.clone()).await;
@@ -178,7 +184,7 @@ impl Broker {
             }
         }
 
-        trace!(target:"solar-actor","***Loop finished**");
+        trace!(target:"solar-actor", "***Loop finished**");
 
         // send a termination signal
         let (terms, termds): (Vec<_>, Vec<_>) = actors
@@ -192,17 +198,17 @@ impl Broker {
             .unzip();
 
         for (actor_id, term) in terms {
-            trace!(target:"solar-actor","Sending term signal to {}", actor_id);
+            trace!(target:"solar-actor", "Sending term signal to {}", actor_id);
             let _ = term.send(Void {});
         }
 
         // wait to be finished
         for (actor_id, termd) in termds {
-            trace!(target:"solar-actor","Waiting termd signal from {}", actor_id);
+            trace!(target:"solar-actor", "Waiting termd signal from {}", actor_id);
             let _ = termd.await;
         }
 
-        trace!(target:"solar-actor","***All actors finished**");
+        trace!(target:"solar-actor", "***All actors finished**");
 
         drop(actors);
     }

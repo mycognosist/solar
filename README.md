@@ -75,18 +75,20 @@ _Undergoing active development._
 
 ## JSON-RPC API
 
-The server currently supports Websocket connections. This may soon change to 
-HTTP.
+The server currently supports HTTP.
 
 | Method | Parameters | Response | Description |
 | --- | --- | --- | --- |
 | `ping` | | `pong!` | Responds if the JSON-RPC server is running |
 | `whoami` | | `<@...=.ed25519>` | Returns the public key of the local node |
 
------
+`curl` can be used to invoke the available methods from the commandline:
 
-_Note:_ [jsonrpc-cli](https://github.com/monomadic/jsonrpc-cli) is a Rust tool 
-useful for testing JSON-RPC endpoints.
+```
+curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "ping", "id":1 }' 127.0.0.1:3030
+
+{"jsonrpc":"2.0","result":"pong!","id":1}
+```
 
 ## License
 

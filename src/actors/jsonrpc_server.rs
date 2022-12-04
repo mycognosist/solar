@@ -2,8 +2,8 @@
 
 use async_std::task;
 use futures::FutureExt;
-use jsonrpc_ws_server::jsonrpc_core::*;
-use jsonrpc_ws_server::ServerBuilder;
+use jsonrpc_http_server::jsonrpc_core::*;
+use jsonrpc_http_server::{AccessControlAllowOrigin, DomainsValidation, ServerBuilder};
 
 use kuska_ssb::keystore::OwnedIdentity;
 
@@ -34,7 +34,11 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
     });
 
     let server_addr = format!("0.0.0.0:{}", port);
-    let server = ServerBuilder::new(io).start(&server_addr.parse()?)?;
+    let server = ServerBuilder::new(io)
+        .cors(DomainsValidation::AllowOnly(vec![
+            AccessControlAllowOrigin::Null,
+        ]))
+        .start_http(&server_addr.parse()?)?;
 
     // Create a close handle to be used when the termination signal is
     // received.
@@ -43,7 +47,7 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
     // Start the JSON-RPC server in a task.
     // This allows us to listen for the termination signal (without blocking).
     task::spawn(async {
-        server.wait().expect("json-rpc server startup failed");
+        server.wait();
     });
 
     // Listen for termination signal from broker.

@@ -16,8 +16,6 @@ pub enum Error {
     DeserializeToml(de::Error),
     /// io::Error.
     IO(io::Error),
-    /// JSON-RPC server error.
-    JsonRpc(jsonrpc_ws_server::Error),
     /// SSB API error.
     KuskaApi(api::Error),
     /// SSB cryptograpy error.
@@ -64,12 +62,6 @@ impl From<xdg::BaseDirectoriesError> for Error {
 impl From<de::Error> for Error {
     fn from(err: de::Error) -> Error {
         Error::DeserializeToml(err)
-    }
-}
-
-impl From<jsonrpc_ws_server::Error> for Error {
-    fn from(err: jsonrpc_ws_server::Error) -> Error {
-        Error::JsonRpc(err)
     }
 }
 
@@ -143,7 +135,6 @@ impl fmt::Display for Error {
                 Error::BaseDirectories(err) => format!("{}", err),
                 Error::DeserializeToml(err) => format!("{}", err),
                 Error::IO(err) => format!("{}", err),
-                Error::JsonRpc(err) => format!("{}", err),
                 Error::KuskaApi(err) => format!("{}", err),
                 Error::KuskaCrypto(err) => format!("{}", err),
                 Error::KuskaDiscovery(err) => format!("{}", err),

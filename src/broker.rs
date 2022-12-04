@@ -1,3 +1,5 @@
+use std::collections::hash_map::HashMap;
+
 use async_std::{
     prelude::*,
     sync::{Arc, Mutex},
@@ -9,10 +11,7 @@ use futures::{
     channel::{mpsc, oneshot},
     FutureExt, SinkExt,
 };
-
 use once_cell::sync::Lazy;
-
-use std::collections::hash_map::HashMap;
 
 use crate::Result;
 
@@ -27,17 +26,25 @@ pub type ChSigRecv = oneshot::Receiver<Void>;
 pub type ChMsgSend = mpsc::UnboundedSender<BrokerMessage>;
 pub type ChMsgRecv = mpsc::UnboundedReceiver<BrokerMessage>;
 
+/// Destination to which a message is addressed.
 #[derive(Eq, PartialEq, Debug)]
 pub enum Destination {
+    /// A single actor identified by ID.
     Actor(usize),
+    /// All actors.
     Broadcast,
 }
 
+/// All events that can occur during the broker message loop.
 #[derive(Debug)]
 pub enum BrokerEvent {
+    /// Actor registration.
     Connect(BrokerEndpoint),
+    /// Actor deregistration.
     Disconnect { actor_id: usize },
+    /// Actor message.
     Message { to: Destination, msg: BrokerMessage },
+    /// Termination signal.
     Terminate,
 }
 
@@ -53,56 +60,84 @@ impl BrokerEvent {
     }
 }
 
+/// The broker-end of an actor-broker connection.
 #[derive(Debug)]
 pub struct BrokerEndpoint {
+    /// Actor ID.
     pub actor_id: usize,
+    /// Terminate signal sender.
     pub ch_terminate: ChSigSend,
+    /// Terminated signal receiver.
     pub ch_terminated: ChSigRecv,
-
+    /// Message sender.
     pub ch_msg: Option<ChMsgSend>,
 }
 
+/// The actor-end of an actor-broker connection.
 #[derive(Debug)]
 pub struct ActorEndpoint {
+    /// Actor ID.
     pub actor_id: usize,
-
+    /// Broker sender.
     pub ch_broker: ChBrokerSend,
+    /// Terminate signal receiver.
     pub ch_terminate: ChSigRecv,
+    /// Terminated signal sender.
     pub ch_terminated: ChSigSend,
-
+    /// Message receiver.
     pub ch_msg: Option<ChMsgRecv>,
 }
 
+/// Broker of the actor-broker system.
 #[derive(Debug)]
 pub struct Broker {
+    /// ID of the most recently registered actor.
     last_actor_id: usize,
+    /// Broker event sender.
     sender: ChBrokerSend,
+    /// Message loop handle.
     msgloop: Option<JoinHandle<()>>,
 }
 
 pub static BROKER: Lazy<Mutex<Broker>> = Lazy::new(|| Mutex::new(Broker::new()));
 
 impl Broker {
+    /// Instantiate a new `Broker` instance.
     pub fn new() -> Self {
+        // Create and split an unbounded message passing channel.
         let (sender, receiver) = mpsc::unbounded();
+        // Spawn the broker message loop.
         let msgloop = task::spawn(Self::msg_loop(receiver));
+
         Self {
             last_actor_id: 0,
             sender,
             msgloop: Some(msgloop),
         }
     }
+
+    /// Return a handle for the broker message loop.
     pub fn take_msgloop(&mut self) -> JoinHandle<()> {
         self.msgloop.take().unwrap()
     }
+
+    /// Register a new actor with the broker.
     pub async fn register(&mut self, name: &str, msg_notify: bool) -> Result<ActorEndpoint> {
+        // Increment the last actor ID value.
         self.last_actor_id += 1;
 
-        trace!(target:"solar-actor","registering actor {}={}", self.last_actor_id, name);
+        trace!(target:"solar-actor", "registering actor {}={}", self.last_actor_id, name);
 
+        // Create oneshot message passing channels for sending and receiving
+        // termination signals.
         let (terminate_sender, terminate_receiver) = oneshot::channel::<Void>();
         let (terminated_sender, terminated_receiver) = oneshot::channel::<Void>();
 
+        // Create and split an unbounded message passing channel for broker
+        // messages.
+        //
+        // This forms the primary communication mechanism linking the broker
+        // and actor.
         let (msg_sender, msg_receiver) = if msg_notify {
             let (s, r) = mpsc::unbounded::<BrokerMessage>();
             (Some(s), Some(r))
@@ -110,12 +145,15 @@ impl Broker {
             (None, None)
         };
 
+        // Instantiate a broker endpoint.
         let broker_endpoint = BrokerEndpoint {
             actor_id: self.last_actor_id,
             ch_terminate: terminate_sender,
             ch_terminated: terminated_receiver,
             ch_msg: msg_sender,
         };
+
+        // Instantiate an actor endpoint.
         let actor_endpoint = ActorEndpoint {
             actor_id: self.last_actor_id,
             ch_broker: self.sender.clone(),
@@ -124,6 +162,8 @@ impl Broker {
             ch_msg: msg_receiver,
         };
 
+        // Send a connection event to the broker.
+        // This completes the registration process.
         self.sender
             .send(BrokerEvent::Connect(broker_endpoint))
             .await
@@ -131,10 +171,13 @@ impl Broker {
 
         Ok(actor_endpoint)
     }
+
+    /// Clone the broker event sender.
     pub fn create_sender(&self) -> ChBrokerSend {
         self.sender.clone()
     }
 
+    /// Spawn an asynchronous task.
     pub fn spawn<F>(fut: F) -> task::JoinHandle<()>
     where
         F: Future<Output = Result<()>> + Send + 'static,
@@ -145,6 +188,13 @@ impl Broker {
             }
         })
     }
+
+    /// Start the broker event loop.
+    ///
+    /// This is the switchboard of the application. It listens for `BrokerEvent`
+    /// messages in a loop and acts accordingly. It is also responsible for
+    /// sending actor termination signals to allow for graceful shutdown of the
+    /// system.
     async fn msg_loop(mut events: mpsc::UnboundedReceiver<BrokerEvent>) {
         let mut actors: HashMap<usize, BrokerEndpoint> = HashMap::new();
 
@@ -155,6 +205,7 @@ impl Broker {
                     Some(event) => event,
                 },
             };
+
             match event {
                 BrokerEvent::Terminate => {
                     info!("Msg Got terminate ");
@@ -165,11 +216,13 @@ impl Broker {
                     actors.insert(actor.actor_id, actor);
                 }
                 BrokerEvent::Disconnect { actor_id } => {
-                    trace!(target:"solar-actor","Unregistering actor {}", actor_id);
+                    trace!(target:"solar-actor", "Deregistering actor {}", actor_id);
                     actors.remove(&actor_id);
                 }
                 BrokerEvent::Message { to, msg } => {
                     for actor in actors.values_mut() {
+                        // Send the message to a single, specific actor or to
+                        // all actors.
                         if to == Destination::Actor(actor.actor_id) || to == Destination::Broadcast
                         {
                             if let Some(ch) = &mut actor.ch_msg {
@@ -181,9 +234,9 @@ impl Broker {
             }
         }
 
-        trace!(target:"solar-actor","***Loop finished**");
+        trace!(target:"solar-actor", "***Loop finished**");
 
-        // send a termination signal
+        // Collect all terminate and terminated channels.
         let (terms, termds): (Vec<_>, Vec<_>) = actors
             .drain()
             .map(|(_, actor)| {
@@ -194,18 +247,19 @@ impl Broker {
             })
             .unzip();
 
+        // Send termination signal to all registered actors.
         for (actor_id, term) in terms {
-            trace!(target:"solar-actor","Sending term signal to {}", actor_id);
+            trace!(target:"solar-actor", "Sending term signal to {}", actor_id);
             let _ = term.send(Void {});
         }
 
-        // wait to be finished
+        // Wait to receive termination confirmation signals from actors.
         for (actor_id, termd) in termds {
-            trace!(target:"solar-actor","Waiting termd signal from {}", actor_id);
+            trace!(target:"solar-actor", "Awaiting termd signal from {}", actor_id);
             let _ = termd.await;
         }
 
-        trace!(target:"solar-actor","***All actors finished**");
+        trace!(target:"solar-actor", "***All actors finished**");
 
         drop(actors);
     }

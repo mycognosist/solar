@@ -22,11 +22,11 @@ use structopt::StructOpt;
 #[derive(StructOpt, Debug)]
 #[structopt(name = "🌞 Solar", about = "Sunbathing scuttlecrabs in kuskaland", version=env!("SOLAR_VERSION"))]
 struct Opt {
-    /// Where data is stored, ~/.local/share/local by default
+    /// Where data is stored (default: ~/.local/share/local)
     #[structopt(short, long, parse(from_os_str))]
     data: Option<PathBuf>,
 
-    /// Connect to peers host:port:publickey,host:port:publickey,...
+    /// Connect to peers host:port:publickey, host:port:publickey...
     #[structopt(short, long)]
     connect: Option<String>,
 
@@ -34,13 +34,17 @@ struct Opt {
     #[structopt(short, long)]
     friends: Option<String>,
 
-    /// Port to bind, 8008 by default
+    /// Port to bind (default: 8008)
     #[structopt(short, long)]
     port: Option<u16>,
 
-    /// Run lan discovery
+    /// Run LAN discovery (default: false)
     #[structopt(short, long)]
     lan: Option<bool>,
+
+    /// Run the JSON-RPC server (default: true)
+    #[structopt(short, long)]
+    jsonrpc: Option<bool>,
 }
 
 mod actors;
@@ -78,6 +82,7 @@ async fn main() -> Result<()> {
 
     let rpc_port = opt.port.unwrap_or(RPC_PORT);
     let lan_discovery = opt.lan.unwrap_or(false);
+    let jsonrpc_server = opt.jsonrpc.unwrap_or(true);
     let listen = format!("0.0.0.0:{}", rpc_port);
 
     env_logger::init();
@@ -180,10 +185,13 @@ async fn main() -> Result<()> {
 
     Broker::spawn(actors::ctrlc::actor());
     Broker::spawn(actors::tcp_server::actor(owned_id.clone(), listen));
-    Broker::spawn(actors::jsonrpc_server::actor(
-        owned_id.clone(),
-        JSON_RPC_PORT,
-    ));
+
+    if jsonrpc_server {
+        Broker::spawn(actors::jsonrpc_server::actor(
+            owned_id.clone(),
+            JSON_RPC_PORT,
+        ));
+    }
 
     if lan_discovery {
         Broker::spawn(actors::lan_discovery::actor(owned_id.clone(), RPC_PORT));

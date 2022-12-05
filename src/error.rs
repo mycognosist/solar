@@ -1,5 +1,6 @@
 use std::{error::Error as ErrorTrait, fmt, io, net};
 
+use jsonrpc_http_server::jsonrpc_core;
 use kuska_ssb::{api, crypto, discovery, feed, handshake, rpc};
 use toml::{de, ser};
 
@@ -122,6 +123,32 @@ impl From<serde_json::Error> for Error {
 impl From<ser::Error> for Error {
     fn from(err: ser::Error) -> Error {
         Error::SerializeToml(err)
+    }
+}
+
+// Conversions for errors which occur in the context of a JSON-RPC method call.
+// Crate-local error variants are converted to JSON-RPC errors which are
+// then return to the caller.
+impl From<Error> for jsonrpc_core::Error {
+    fn from(err: Error) -> Self {
+        match &err {
+            Error::KV(err_msg) => jsonrpc_core::Error {
+                code: jsonrpc_core::ErrorCode::ServerError(-32000),
+                message: err_msg.to_string(),
+                data: None,
+            },
+            Error::KuskaFeed(err_msg) => jsonrpc_core::Error {
+                code: jsonrpc_core::ErrorCode::ServerError(-32001),
+                message: err_msg.to_string(),
+                data: None,
+            },
+            Error::SerdeJson(err_msg) => jsonrpc_core::Error {
+                code: jsonrpc_core::ErrorCode::ServerError(-32002),
+                message: err_msg.to_string(),
+                data: None,
+            },
+            _ => todo!(),
+        }
     }
 }
 

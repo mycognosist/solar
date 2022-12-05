@@ -82,7 +82,7 @@ The server currently supports HTTP.
 | --- | --- | --- | --- |
 | `ping` | | `pong!` | Responds if the JSON-RPC server is running |
 | `whoami` | | `<@...=.ed25519>` | Returns the public key of the local node |
-| `publish` | `<content>` | `{ msg_key: <%...=.sha256>, next_seq: <int> }` | Publishes a message and returns the key (message hash) and next sequence number |
+| `publish` | `<content>` | `{ msg_key: <%...=.sha256>, next_seq: <int> }` | Publishes a message and returns the key (message hash) and sequence number |
 
 `curl` can be used to invoke the available methods from the commandline:
 
@@ -95,7 +95,13 @@ curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method"
 ```
 curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "publish", "params": {"type": "about", "about": "@o8lWpyLeSqV/BJV9pbxFhKpwm6Lw5k+sqexYK+zT9Tc=.ed25519", "name": "solar_glyph", "description": "glyph's experimental solar (rust) node"}, "id":1 }' 127.0.0.1:3030
 
-{"jsonrpc":"2.0","result":"pong!","id":1}
+{"jsonrpc":"2.0","result":{"msg_key": "", "seq": "","id":1}
+```
+
+_Note: You might find it easier to save your JSON to file and pass that to `curl` instead._
+
+```
+curl -X POST -H "Content-Type: application/json" --data @publish.json 127.0.0.1:3030
 ```
 
 ## License

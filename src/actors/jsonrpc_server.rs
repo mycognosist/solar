@@ -35,8 +35,7 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
     io.add_sync_method("whoami", move |_| Ok(Value::String(local_pk.to_owned())));
 
     // Publish a typed message (raw).
-    // Returns the key (hash) of the published message and the next sequence
-    // number.
+    // Returns the key (hash) and sequence number of the published message.
     io.add_sync_method("publish", move |params: Params| {
         task::block_on(async {
             // Parse the parameter containing the post content.
@@ -59,19 +58,18 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
                 .map_err(Error::KuskaFeed)?;
 
             // Append the signed message to the feed.
-            let next_seq = feed_storage
+            let seq = feed_storage
                 .append_feed(msg.clone())
                 .await
                 .map_err(Error::KV)?;
 
             info!(
-                "published message {}. next sequence number is {}",
+                "published message {} with sequence number {}",
                 msg.id().to_string(),
-                next_seq
+                seq
             );
 
-            // TODO: key, ref, id, hash... ?
-            let response = json![{ "msg_key": msg.id().to_string(), "next_seq": next_seq }];
+            let response = json![{ "msg_ref": msg.id().to_string(), "seq": seq }];
 
             Ok(response)
         })

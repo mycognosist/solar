@@ -74,20 +74,6 @@ impl KvStorage {
         Ok(())
     }
 
-    pub fn get_last_feed_no(&self, user_id: &str) -> Result<Option<u64>> {
-        let db = self.db.as_ref().unwrap();
-        let key = Self::key_lastfeed(user_id);
-        let count = if let Some(value) = db.get(&key)? {
-            let mut u64_buffer = [0u8; 8];
-            u64_buffer.copy_from_slice(&value);
-            Some(u64::from_be_bytes(u64_buffer))
-        } else {
-            None
-        };
-
-        Ok(count)
-    }
-
     fn key_feed(user_id: &str, feed_seq: u64) -> Vec<u8> {
         let mut key = Vec::new();
         key.push(PREFIX_FEED);
@@ -148,6 +134,20 @@ impl KvStorage {
         Ok(list)
     }
 
+    pub fn get_last_feed_no(&self, user_id: &str) -> Result<Option<u64>> {
+        let db = self.db.as_ref().unwrap();
+        let key = Self::key_lastfeed(user_id);
+        let count = if let Some(value) = db.get(&key)? {
+            let mut u64_buffer = [0u8; 8];
+            u64_buffer.copy_from_slice(&value);
+            Some(u64::from_be_bytes(u64_buffer))
+        } else {
+            None
+        };
+
+        Ok(count)
+    }
+
     pub fn get_feed(&self, user_id: &str, feed_seq: u64) -> Result<Option<Feed>> {
         let db = self.db.as_ref().unwrap();
         if let Some(raw) = db.get(Self::key_feed(user_id, feed_seq))? {
@@ -170,6 +170,16 @@ impl KvStorage {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn get_last_message(&self, user_id: &str) -> Result<Option<Message>> {
+        let last_msg = if let Some(last_id) = self.get_last_feed_no(user_id)? {
+            Some(self.get_feed(user_id, last_id)?.unwrap().into_message()?)
+        } else {
+            None
+        };
+
+        Ok(last_msg)
     }
 
     pub async fn append_feed(&self, msg: Message) -> Result<u64> {

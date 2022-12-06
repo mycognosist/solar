@@ -24,14 +24,12 @@ cd solar
 cargo build --release
 ```
 
-Add friend(s) to `solar.toml` (public key(s) of feeds you wish to replicate):
+Add peer(s) to `replication.toml` (public key(s) of feeds you wish to replicate):
 
 ```
-vim ~/.local/share/solar/solar.toml
+vim ~/.local/share/solar/replication.toml
 
-id = "@...=.ed25519"
-secret "...==.ed25519"
-friends = ["@...=.ed25519"]
+peers = ["@...=.ed25519"]
 ```
 
 Run solar with LAN discovery enabled:
@@ -39,6 +37,10 @@ Run solar with LAN discovery enabled:
 ```
 ./target/release/solar --lan true
 ```
+
+_Note: a new public-private keypair will be generated and saved to
+`~/.local/share/solar/secret.toml` (or in the equivalent directory on your
+operating system)._
 
 ## Core Features
 

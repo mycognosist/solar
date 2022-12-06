@@ -50,7 +50,7 @@ mod error;
 mod storage;
 
 use broker::*;
-use config::Config;
+use config::{ReplicationConfig, SecretConfig};
 use kuska_ssb::crypto::{ToSodiumObject, ToSsbId};
 use storage::{blob::BlobStorage, kv::KvStorage};
 
@@ -68,10 +68,14 @@ pub static KV_STORAGE: Lazy<Arc<RwLock<KvStorage>>> =
 // Instantiate the blob store.
 pub static BLOB_STORAGE: Lazy<Arc<RwLock<BlobStorage>>> =
     Lazy::new(|| Arc::new(RwLock::new(BlobStorage::default())));
+
 // Instantiate the application configuration.
-// This includes the public-private keypair and list of Scuttlebutt peers to
-// replicate.
-pub static CONFIG: OnceCell<Config> = OnceCell::new();
+// This includes the public-private keypair.
+pub static SECRET_CONFIG: OnceCell<SecretConfig> = OnceCell::new();
+
+// Intstantiate the replication configuration.
+// This is currently just a list of Scuttlebutt peers to replicate.
+pub static REPLICATION_CONFIG: OnceCell<ReplicationConfig> = OnceCell::new();
 
 #[async_std::main]
 async fn main() -> Result<()> {
@@ -100,13 +104,15 @@ async fn main() -> Result<()> {
 
     println!("Base configuration is {:?}", base_path);
 
-    let mut key_file = base_path.clone();
+    let mut secret_key_file = base_path.clone();
+    let mut replication_config_file = base_path.clone();
     let mut feeds_folder = base_path.clone();
     let mut blobs_folder = base_path;
 
-    // Define the filename of the config file (contains public-private keypair
-    // and list of peers to be replicated).
-    key_file.push("solar.toml");
+    // Define the filename of the secret config file.
+    secret_key_file.push("secret.toml");
+    // Define the filename of the replication config file.
+    replication_config_file.push("replication.toml");
     // Define the directory name for the feed store.
     feeds_folder.push("feeds");
     // Define the directory name for the blob store.
@@ -115,20 +121,42 @@ async fn main() -> Result<()> {
     std::fs::create_dir_all(&feeds_folder)?;
     std::fs::create_dir_all(&blobs_folder)?;
 
-    // If the config file is not found, generate a new one and write it to file.
-    // This includes the creation of a unique public-private keypair.
-    let mut config = if !key_file.is_file() {
-        println!("Private key not found, generated new one in {:?}", key_file);
-        let config = Config::create();
-        let mut file = File::create(&key_file).await?;
+    // If the secret config file is not found, generate a new one and write it
+    // to file. This includes the creation of a unique public-private keypair.
+    let secret_config = if !secret_key_file.is_file() {
+        println!(
+            "Private key not found, generated new one in {:?}",
+            secret_key_file
+        );
+        let config = SecretConfig::create();
+        let mut file = File::create(&secret_key_file).await?;
         file.write_all(&config.to_toml()?).await?;
         config
     } else {
         // If the config file exists, open it and read the contents.
-        let mut file = File::open(&key_file).await?;
+        let mut file = File::open(&secret_key_file).await?;
         let mut raw: Vec<u8> = Vec::new();
         file.read_to_end(&mut raw).await?;
-        Config::from_toml(&raw)?
+        SecretConfig::from_toml(&raw)?
+    };
+
+    // If the replication config file is not found, generate a new one and
+    // write it to file.
+    let mut replication_config = if !replication_config_file.is_file() {
+        println!(
+            "Replication configuration file not found, generated new one in {:?}",
+            replication_config_file
+        );
+        let config = ReplicationConfig::create();
+        let mut file = File::create(&replication_config_file).await?;
+        file.write_all(&config.to_toml()?).await?;
+        config
+    } else {
+        // If the config file exists, open it and read the contents.
+        let mut file = File::open(&replication_config_file).await?;
+        let mut raw: Vec<u8> = Vec::new();
+        file.read_to_end(&mut raw).await?;
+        ReplicationConfig::from_toml(&raw)?
     };
 
     let mut connects = Vec::new();
@@ -164,29 +192,32 @@ async fn main() -> Result<()> {
             if friend == "connect" {
                 for conn in &connects {
                     let conn_id = format!("@{}", conn.2.to_ssb_id());
-                    if !config.friends.contains(&conn_id) {
-                        config.friends.push(conn_id);
+                    if !replication_config.peers.contains(&conn_id) {
+                        replication_config.peers.push(conn_id);
                     }
                 }
             // Prevent duplicate entries by checking if the given public key
             // is already contained in the config.
-            } else if !config.friends.contains(&friend.to_string()) {
-                config.friends.push(friend.to_string())
+            } else if !replication_config.peers.contains(&friend.to_string()) {
+                replication_config.peers.push(friend.to_string())
             }
         }
-        let mut file = File::create(key_file).await?;
-        file.write_all(&config.to_toml()?).await?;
+        let mut file = File::create(replication_config_file).await?;
+        file.write_all(&replication_config.to_toml()?).await?;
     }
 
     // Log the list of public keys idetifying peers whose data will be
     // replicated.
-    debug!(target:"solar", "friends are {:?}", config.friends);
+    debug!(target:"solar", "peers to be replicated are {:?}", replication_config.peers);
 
     // Retrieve the public-private keypair of the local solar node.
-    let owned_id = config.owned_identity()?;
+    let owned_id = secret_config.owned_identity()?;
 
-    // Set the value of the configuration cell.
-    let _err = CONFIG.set(config);
+    // Set the value of the secret configuration cell.
+    let _err = SECRET_CONFIG.set(secret_config);
+
+    // Set the value of the replication configuration cell.
+    let _err = REPLICATION_CONFIG.set(replication_config);
 
     // Print 'server started' announcement.
     println!(

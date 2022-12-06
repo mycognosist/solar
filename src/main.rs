@@ -22,13 +22,15 @@ struct Opt {
     #[structopt(short, long, parse(from_os_str))]
     data: Option<PathBuf>,
 
-    /// Connect to peers host:port:publickey, host:port:publickey...
+    /// Connect to peers (e.g. host:port:publickey, host:port:publickey)
     #[structopt(short, long)]
     connect: Option<String>,
 
-    /// List of friends, "connect" magical word means that --connect peers are friends
+    // TODO: think about other ways of exposing the "connect" feature
+    /// List of peers to replicate; "connect" magic word means that peers
+    /// specified with --connect are added to the replication list
     #[structopt(short, long)]
-    friends: Option<String>,
+    replicate: Option<String>,
 
     /// Port to bind (default: 8008)
     #[structopt(short, long)]
@@ -184,12 +186,12 @@ async fn main() -> Result<()> {
 
     // Parse the list of public keys identifying peers whose data should be
     // replicated. Write the keys to file if they are not stored there already.
-    if let Some(friends) = opt.friends {
-        for friend in friends.split(',') {
+    if let Some(peers) = opt.replicate {
+        for peer in peers.split(',') {
             // If `connect` appears in the input, add the public key of each
             // peer specified in the `connect` option to the list of peers to
             // be replicated.
-            if friend == "connect" {
+            if peer == "connect" {
                 for conn in &connects {
                     let conn_id = format!("@{}", conn.2.to_ssb_id());
                     if !replication_config.peers.contains(&conn_id) {
@@ -198,8 +200,8 @@ async fn main() -> Result<()> {
                 }
             // Prevent duplicate entries by checking if the given public key
             // is already contained in the config.
-            } else if !replication_config.peers.contains(&friend.to_string()) {
-                replication_config.peers.push(friend.to_string())
+            } else if !replication_config.peers.contains(&peer.to_string()) {
+                replication_config.peers.push(peer.to_string())
             }
         }
         let mut file = File::create(replication_config_file).await?;

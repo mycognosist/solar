@@ -106,8 +106,10 @@ where
     async fn on_timer(&mut self, api: &mut ApiCaller<W>) -> Result<bool> {
         if !self.initialized {
             debug!(target: "solar", "initializing historystreamhandler");
+
             let args = dto::CreateHistoryStreamIn::new(CONFIG.get().unwrap().id.clone());
             let _ = api.create_history_stream_req_send(&args).await?;
+
             for friend in &CONFIG.get().unwrap().friends {
                 let mut args = dto::CreateHistoryStreamIn::new(friend.to_string()).live(true);
                 if let Some(last_feed) = KV_STORAGE.read().await.get_last_feed_no(friend)? {
@@ -117,20 +119,25 @@ where
                 self.friends.insert(id, friend.to_string());
                 debug!(target: "solar", "Requesting feeds from friend {} starting with {:?}" ,friend,args.seq);
             }
+
             self.initialized = true;
         }
+
         Ok(false)
     }
 
     fn extract_blob_refs(&mut self, msg: &Message) -> Vec<String> {
         let mut refs = Vec::new();
+
         let msg = serde_json::from_value(msg.content().clone());
+
         if let Ok(dto::content::TypedMessage::Post { text, .. }) = msg {
             for cap in BLOB_REGEX.captures_iter(&text) {
                 let key = cap.get(0).unwrap().as_str().to_owned();
                 refs.push(key);
             }
         }
+
         refs
     }
 
@@ -148,9 +155,12 @@ where
                 .await
                 .get_last_feed_no(&msg.author().to_string())?
                 .unwrap_or(0);
+
             if msg.sequence() == last_feed + 1 {
                 KV_STORAGE.write().await.append_feed(msg.clone()).await?;
+
                 info!("Received {} msg no {}", msg.author(), msg.sequence());
+
                 for key in self.extract_blob_refs(&msg) {
                     if !BLOB_STORAGE.read().await.exists(&key) {
                         let event = super::blobs_get::RpcBlobsGetEvent::Get(dto::BlobsGetIn {
@@ -269,6 +279,7 @@ where
             "Sending history stream {} ({}..{})",
             req.args.id, req.from, last
         );
+
         for n in req.from..last {
             let data = KV_STORAGE.read().await.get_feed(&req_id, n)?.unwrap();
             let data = if with_keys {
@@ -280,6 +291,7 @@ where
         }
 
         req.from = last;
+
         Ok(())
     }
 }

@@ -69,6 +69,7 @@ where
         req: &rpc::Body,
     ) -> Result<bool> {
         let args: Vec<String> = serde_json::from_value(req.args.clone())?;
+
         let msg = KV_STORAGE.read().await.get_message(&args[0]);
         match msg {
             Ok(Some(msg)) => api.get_res_send(req_no, &msg).await?,
@@ -82,6 +83,7 @@ where
                 api.rpc().send_error(req_no, req.rpc_type, &msg).await?
             }
         };
+
         Ok(true)
     }
 }

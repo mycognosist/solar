@@ -83,6 +83,7 @@ where
             }
             _ => {}
         }
+
         Ok(false)
     }
 }
@@ -100,9 +101,10 @@ where
         let mut args: Vec<dto::BlobsGetIn> = serde_json::from_value(req.args.clone())?;
         let args = args.pop().unwrap();
 
-        trace!(target: "ssb-blob", "requested blob {}",args.key);
+        trace!(target: "ssb-blob", "requested blob {}", args.key);
 
         let data = BLOB_STORAGE.read().await.get(&args.key)?;
+
         if let Some(expected_size) = args.size {
             if data.len() != expected_size as usize {
                 trace!(target: "ssb-blob", "not sending blob: blob.len != expected");
@@ -112,6 +114,7 @@ where
                 return Ok(true);
             }
         }
+
         if let Some(max) = args.max {
             if data.len() > max as usize {
                 trace!(target: "ssb-blob", "not sending blob: blob.len > max");
@@ -121,6 +124,7 @@ where
                 return Ok(true);
             }
         }
+
         api.blobs_get_res_send(req_no, &data).await?;
         self.incoming_reqs.insert(req_no);
 
@@ -143,11 +147,11 @@ where
             let received_blob_id = res.blob_hash_id();
             if received_blob_id != expected_blob_id {
                 warn!(
-                    "Recieved a blob with bad hash, recieved={} expected={}",
+                    "Received a blob with bad hash, received={} expected={}",
                     received_blob_id, expected_blob_id
                 );
             } else {
-                info!("Recieved blob {}", received_blob_id);
+                info!("Received blob {}", received_blob_id);
                 BLOB_STORAGE.write().await.insert(res).await?;
             }
             Ok(true)
@@ -158,8 +162,10 @@ where
 
     async fn event_get(&mut self, api: &mut ApiCaller<W>, req: &dto::BlobsGetIn) -> Result<bool> {
         info!("Requesting blob {}", req.key);
+
         let req_no = api.blobs_get_req_send(req).await?;
         self.outcoming_reqs.insert(req_no, req.key.clone());
+
         Ok(true)
     }
 }

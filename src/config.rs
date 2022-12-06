@@ -22,12 +22,15 @@ impl Config {
             friends: Vec::new(),
         }
     }
+
     pub fn to_toml(&self) -> Result<Vec<u8>> {
         Ok(toml::to_vec(&self)?)
     }
+
     pub fn from_toml(s: &[u8]) -> Result<Self> {
         Ok(toml::from_slice::<Config>(s)?)
     }
+
     pub fn owned_identity(&self) -> Result<OwnedIdentity> {
         Ok(OwnedIdentity {
             id: self.id.clone(),

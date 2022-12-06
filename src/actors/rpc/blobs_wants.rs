@@ -177,6 +177,7 @@ where
             }
             _ => {}
         };
+
         Ok(false)
     }
 }
@@ -192,11 +193,12 @@ where
         _req: &rpc::Body,
     ) -> Result<bool> {
         if self.peer_wants_req_no.is_none() {
-            trace!(target: "ssb-blob", "recieved create wants");
+            trace!(target: "ssb-blob", "received create wants");
             self.peer_wants_req_no = Some(req_no);
         } else {
             trace!(target: "ssb-blob", "peer create wants already received");
         }
+
         Ok(true)
     }
 
@@ -207,11 +209,13 @@ where
         broadcast: &[(String, i64)],
     ) -> Result<bool> {
         let mut wants: HashMap<String, i64> = HashMap::new();
+
         for (blob_id, distance) in broadcast {
             if !self.peer_wants.contains_key(blob_id) {
                 wants.insert(blob_id.clone(), *distance);
             }
         }
+
         api.rpc()
             .send_response(
                 self.my_wants_req_no.unwrap(),
@@ -220,6 +224,7 @@ where
                 &serde_json::to_vec(&wants)?,
             )
             .await?;
+
         Ok(true)
     }
 
@@ -227,6 +232,7 @@ where
         if self.peer_wants.contains_key(blob_id) {
             let mut haves: HashMap<String, i64> = HashMap::new();
             haves.insert(blob_id.to_string(), 1);
+
             api.rpc()
                 .send_response(
                     self.peer_wants_req_no.unwrap(),
@@ -236,6 +242,7 @@ where
                 )
                 .await?;
         }
+
         Ok(true)
     }
 
@@ -253,7 +260,9 @@ where
         let wants: HashMap<String, i64> = serde_json::from_slice(data)?;
         let mut haves: HashMap<String, u64> = HashMap::new();
         let mut broadcast: Vec<(String, i64)> = Vec::new();
-        trace!(target: "ssb-blob", "wants:{:?}",wants);
+
+        trace!(target: "ssb-blob", "wants:{:?}", wants);
+
         for (want, distance) in wants {
             if let Some(size) = BLOB_STORAGE.read().await.size_of(&want)? {
                 haves.insert(want, size);
@@ -262,8 +271,9 @@ where
                 broadcast.push((want, distance + 1));
             }
         }
-        trace!(target: "ssb-blob", "haves:{:?}",haves);
-        trace!(target: "ssb-blob", "don't-haves:{:?}",broadcast);
+
+        trace!(target: "ssb-blob", "haves:{:?}", haves);
+        trace!(target: "ssb-blob", "don't-haves:{:?}", broadcast);
 
         // respond with the blobs that I have
         api.rpc()
@@ -294,7 +304,8 @@ where
         _ch_broker: &mut ChBrokerSend,
     ) -> Result<bool> {
         let haves: HashMap<String, i64> = serde_json::from_slice(data)?;
-        trace!(target: "ssb-blob", "haves:{:?}",haves);
+
+        trace!(target: "ssb-blob", "haves:{:?}", haves);
 
         for (blob_id, _) in haves {
             if let Some(wants) = self.peer_wants.get_mut(&blob_id) {

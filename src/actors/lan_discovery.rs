@@ -31,10 +31,13 @@ pub async fn actor(server_id: OwnedIdentity, rpc_port: u16) -> Result<()> {
             }
             _ = task::sleep(Duration::from_secs(5)).fuse() => {}
         }
+
         drop(socket);
         broadcaster.send().await;
     }
+
     let _ = broker.ch_terminated.send(Void {});
+
     Ok(())
 }
 

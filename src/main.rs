@@ -19,6 +19,8 @@ use sled::Config as KvConfig;
 use std::{env, path::PathBuf};
 use structopt::StructOpt;
 
+// Generate a command line parser.
+// This defines the options that are exposed when running the solar binary.
 #[derive(StructOpt, Debug)]
 #[structopt(name = "🌞 Solar", about = "Sunbathing scuttlecrabs in kuskaland", version=env!("SOLAR_VERSION"))]
 struct Opt {
@@ -61,32 +63,46 @@ use storage::{blob::BlobStorage, kv::KvStorage};
 /// Convenience Result that returns `solar::Error`.
 pub type Result<T> = std::result::Result<T, error::Error>;
 
+// Define the port used for TCP connections (boxstream and MUXRPC).
 const RPC_PORT: u16 = 8008;
+// Define the port used for the JSON-RPC server.
 const JSON_RPC_PORT: u16 = 3030;
 
+// Instantiate the key-value store.
 pub static KV_STORAGE: Lazy<Arc<RwLock<KvStorage>>> =
     Lazy::new(|| Arc::new(RwLock::new(KvStorage::default())));
+// Instantiate the blob store.
 pub static BLOB_STORAGE: Lazy<Arc<RwLock<BlobStorage>>> =
     Lazy::new(|| Arc::new(RwLock::new(BlobStorage::default())));
+// Instantiate the application configuration.
+// This includes the public-private keypair and list of Scuttlebutt peers to
+// replicate.
 pub static CONFIG: OnceCell<Config> = OnceCell::new();
 
 #[async_std::main]
 async fn main() -> Result<()> {
-    let opt = Opt::from_args();
-
     println!("🌞 Solar {}", env!("SOLAR_VERSION"));
 
-    let base_path = opt
-        .data
-        .unwrap_or(xdg::BaseDirectories::new()?.create_data_directory("solar")?);
+    // Parse the CLI arguments.
+    let opt = Opt::from_args();
 
+    // Retrieve application configuration parameters from the parsed CLI input.
+    // Set defaults if options have not been provided.
     let rpc_port = opt.port.unwrap_or(RPC_PORT);
     let lan_discovery = opt.lan.unwrap_or(false);
     let jsonrpc_server = opt.jsonrpc.unwrap_or(true);
     let listen = format!("0.0.0.0:{}", rpc_port);
 
+    // Initialise the logger.
     env_logger::init();
     log::set_max_level(log::LevelFilter::max());
+
+    // Create the root data directory for solar.
+    // This is the path at which application data is stored, including the
+    // public-private keypair, key-value database and blob store.
+    let base_path = opt
+        .data
+        .unwrap_or(xdg::BaseDirectories::new()?.create_data_directory("solar")?);
 
     println!("Base configuration is {:?}", base_path);
 
@@ -94,12 +110,19 @@ async fn main() -> Result<()> {
     let mut feeds_folder = base_path.clone();
     let mut blobs_folder = base_path;
 
+    // Define the filename of the config file (contains public-private keypair
+    // and list of peers to be replicated).
     key_file.push("solar.toml");
+    // Define the directory name for the feed store.
     feeds_folder.push("feeds");
+    // Define the directory name for the blob store.
     blobs_folder.push("blobs");
+    // Create the feed and blobs directories.
     std::fs::create_dir_all(&feeds_folder)?;
     std::fs::create_dir_all(&blobs_folder)?;
 
+    // If the config file is not found, generate a new one and write it to file.
+    // This includes the creation of a unique public-private keypair.
     let mut config = if !key_file.is_file() {
         println!("Private key not found, generated new one in {:?}", key_file);
         let config = Config::create();
@@ -107,6 +130,7 @@ async fn main() -> Result<()> {
         file.write_all(&config.to_toml()?).await?;
         config
     } else {
+        // If the config file exists, open it and read the contents.
         let mut file = File::open(&key_file).await?;
         let mut raw: Vec<u8> = Vec::new();
         file.read_to_end(&mut raw).await?;
@@ -114,6 +138,10 @@ async fn main() -> Result<()> {
     };
 
     let mut connects = Vec::new();
+    // Parse peer connection details from the provided CLI options.
+    // Each instance of `host:port:publickey` is separated from the others
+    // and divided into its constituent parts. The tuple of the parts is
+    // then pushed to the `connects` vector.
     if let Some(connect) = opt.connect {
         for peer in connect.split(',') {
             let invalid_peer_msg = || format!("invalid peer {}", peer);
@@ -132,8 +160,13 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Parse the list of public keys identifying peers whose data should be
+    // replicated. Write the keys to file if they are not stored there already.
     if let Some(friends) = opt.friends {
         for friend in friends.split(',') {
+            // If `connect` appears in the input, add the public key of each
+            // peer specified in the `connect` option to the list of peers to
+            // be replicated.
             if friend == "connect" {
                 for conn in &connects {
                     let conn_id = format!("@{}", conn.2.to_ssb_id());
@@ -141,6 +174,8 @@ async fn main() -> Result<()> {
                         config.friends.push(conn_id);
                     }
                 }
+            // Prevent duplicate entries by checking if the given public key
+            // is already contained in the config.
             } else if !config.friends.contains(&friend.to_string()) {
                 config.friends.push(friend.to_string())
             }
@@ -149,11 +184,17 @@ async fn main() -> Result<()> {
         file.write_all(&config.to_toml()?).await?;
     }
 
+    // Log the list of public keys idetifying peers whose data will be
+    // replicated.
     debug!(target:"solar", "friends are {:?}", config.friends);
 
+    // Retrieve the public-private keypair of the local solar node.
     let owned_id = config.owned_identity()?;
+
+    // Set the value of the configuration cell.
     let _err = CONFIG.set(config);
 
+    // Print 'server started' announcement.
     println!(
         "Server started on {}:{}",
         listen,
@@ -173,19 +214,27 @@ async fn main() -> Result<()> {
         .path(&feeds_folder)
         .cache_capacity(kv_cache_capacity);
 
+    // Open the key-value store using the given configuration parameters and
+    // an unbounded sender channel for message passing.
     KV_STORAGE
         .write()
         .await
         .open(kv_storage_config, BROKER.lock().await.create_sender())?;
 
+    // Open the blobstore using the given folder path and an unbounded sender
+    // channel for message passing.
     BLOB_STORAGE
         .write()
         .await
         .open(blobs_folder, BROKER.lock().await.create_sender());
 
+    // Spawn the ctrlc actor. Listens for SIGINT termination signal.
     Broker::spawn(actors::ctrlc::actor());
+    // Spawn the TCP server. Facilitates peer connections.
     Broker::spawn(actors::tcp_server::actor(owned_id.clone(), listen));
 
+    // Spawn the JSON-RPC server if the option has been set to true in the
+    // CLI arguments. Facilitates operator queries during runtime.
     if jsonrpc_server {
         Broker::spawn(actors::jsonrpc_server::actor(
             owned_id.clone(),
@@ -193,10 +242,14 @@ async fn main() -> Result<()> {
         ));
     }
 
+    // Spawn the LAN discovery actor. Listens for and broadcasts UDP packets
+    // to allow LAN-local peer connections.
     if lan_discovery {
         Broker::spawn(actors::lan_discovery::actor(owned_id.clone(), RPC_PORT));
     }
 
+    // Spawn the peer actor for each set of provided connection parameters.
+    // Facilitates replication.
     for (server, port, peer_pk) in connects {
         Broker::spawn(actors::peer::actor(
             owned_id.clone(),
@@ -208,9 +261,11 @@ async fn main() -> Result<()> {
         ));
     }
 
+    // Spawn the broker message loop.
     let msgloop = BROKER.lock().await.take_msgloop();
     msgloop.await;
 
     println!("Gracefully finished");
+
     Ok(())
 }

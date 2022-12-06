@@ -2,11 +2,12 @@
 
 use async_std::task;
 use futures::FutureExt;
-use jsonrpc_http_server::jsonrpc_core::*;
-use jsonrpc_http_server::{AccessControlAllowOrigin, DomainsValidation, ServerBuilder};
-use serde_json::json;
-
+use jsonrpc_http_server::{
+    jsonrpc_core::*, AccessControlAllowOrigin, DomainsValidation, ServerBuilder,
+};
 use kuska_ssb::{api::dto::content::TypedMessage, feed::Message, keystore::OwnedIdentity};
+use log::{info, warn};
+use serde_json::json;
 
 use crate::{broker::*, error::Error, Result, KV_STORAGE};
 

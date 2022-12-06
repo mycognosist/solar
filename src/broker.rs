@@ -9,8 +9,9 @@ use async_std::{
 use core::any::Any;
 use futures::{
     channel::{mpsc, oneshot},
-    FutureExt, SinkExt,
+    select_biased, FutureExt, SinkExt,
 };
+use log::{info, trace};
 use once_cell::sync::Lazy;
 
 use crate::Result;

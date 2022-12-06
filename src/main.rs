@@ -1,22 +1,16 @@
 #![recursion_limit = "256"]
 
-#[macro_use]
-extern crate futures;
-#[macro_use]
-extern crate log;
-extern crate procfs;
-extern crate sha2;
-extern crate slice_deque;
-#[macro_use]
-extern crate serde;
-extern crate toml;
+use std::{env, path::PathBuf};
 
-use async_std::{fs::File, io::ReadExt, prelude::*};
-
-use async_std::sync::{Arc, RwLock};
+use async_std::{
+    fs::File,
+    io::ReadExt,
+    prelude::*,
+    sync::{Arc, RwLock},
+};
+use log::debug;
 use once_cell::sync::{Lazy, OnceCell};
 use sled::Config as KvConfig;
-use std::{env, path::PathBuf};
 use structopt::StructOpt;
 
 // Generate a command line parser.

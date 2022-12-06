@@ -16,7 +16,7 @@ use crate::{
     actors::rpc::handler::{RpcHandler, RpcInput},
     broker::{BrokerEvent, ChBrokerSend, Destination},
     storage::kv::StoKvEvent,
-    Result, BLOB_STORAGE, CONFIG, KV_STORAGE,
+    Result, BLOB_STORAGE, KV_STORAGE, REPLICATION_CONFIG, SECRET_CONFIG,
 };
 
 pub static BLOB_REGEX: Lazy<Regex> =
@@ -36,7 +36,7 @@ where
     initialized: bool,
     _actor_id: usize,
     reqs: HashMap<String, HistoryStreamRequest>,
-    friends: HashMap<i32, String>,
+    peers: HashMap<i32, String>,
     phantom: PhantomData<W>,
 }
 
@@ -97,7 +97,7 @@ where
         Self {
             _actor_id: actor_id,
             initialized: false,
-            friends: HashMap::new(),
+            peers: HashMap::new(),
             reqs: HashMap::new(),
             phantom: PhantomData,
         }
@@ -107,17 +107,17 @@ where
         if !self.initialized {
             debug!(target: "solar", "initializing historystreamhandler");
 
-            let args = dto::CreateHistoryStreamIn::new(CONFIG.get().unwrap().id.clone());
+            let args = dto::CreateHistoryStreamIn::new(SECRET_CONFIG.get().unwrap().id.clone());
             let _ = api.create_history_stream_req_send(&args).await?;
 
-            for friend in &CONFIG.get().unwrap().friends {
-                let mut args = dto::CreateHistoryStreamIn::new(friend.to_string()).live(true);
-                if let Some(last_feed) = KV_STORAGE.read().await.get_last_feed_no(friend)? {
+            for peer in &REPLICATION_CONFIG.get().unwrap().peers {
+                let mut args = dto::CreateHistoryStreamIn::new(peer.to_string()).live(true);
+                if let Some(last_feed) = KV_STORAGE.read().await.get_last_feed_no(peer)? {
                     args = args.after_seq(last_feed);
                 }
                 let id = api.create_history_stream_req_send(&args).await?;
-                self.friends.insert(id, friend.to_string());
-                debug!(target: "solar", "Requesting feeds from friend {} starting with {:?}" ,friend,args.seq);
+                self.peers.insert(id, peer.to_string());
+                debug!(target: "solar", "requesting feeds from peer {} starting with {:?}", peer, args.seq);
             }
 
             self.initialized = true;
@@ -148,7 +148,7 @@ where
         req_no: i32,
         res: &[u8],
     ) -> Result<bool> {
-        if self.friends.contains_key(&req_no) {
+        if self.peers.contains_key(&req_no) {
             let msg = Message::from_slice(res)?;
             let last_feed = KV_STORAGE
                 .read()

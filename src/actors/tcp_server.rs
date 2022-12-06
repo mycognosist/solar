@@ -2,9 +2,7 @@ use async_std::{
     net::{TcpListener, ToSocketAddrs},
     prelude::*,
 };
-
-use futures::FutureExt;
-
+use futures::{select_biased, FutureExt};
 use kuska_ssb::keystore::OwnedIdentity;
 
 use crate::{broker::*, Result};

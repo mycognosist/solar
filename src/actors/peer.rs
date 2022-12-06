@@ -1,4 +1,3 @@
-use once_cell::sync::Lazy;
 use std::{collections::HashSet, time::Duration};
 
 use async_std::{
@@ -7,10 +6,7 @@ use async_std::{
     sync::{Arc, RwLock},
     task,
 };
-use futures::stream::StreamExt;
-
-use futures::{FutureExt, SinkExt};
-
+use futures::{pin_mut, select_biased, stream::StreamExt, FutureExt, SinkExt};
 use kuska_ssb::{
     api::ApiCaller,
     crypto::{ed25519, ToSsbId},
@@ -22,12 +18,16 @@ use kuska_ssb::{
     keystore::OwnedIdentity,
     rpc::{RpcReader, RpcWriter},
 };
+use log::{error, info, trace, warn};
+use once_cell::sync::Lazy;
 
-use crate::{broker::*, Result};
-
-use super::rpc::{
-    BlobsGetHandler, BlobsWantsHandler, GetHandler, HistoryStreamHandler, RpcHandler, RpcInput,
-    WhoAmIHandler,
+use crate::{
+    actors::rpc::{
+        BlobsGetHandler, BlobsWantsHandler, GetHandler, HistoryStreamHandler, RpcHandler, RpcInput,
+        WhoAmIHandler,
+    },
+    broker::*,
+    Result,
 };
 
 pub enum Connect {

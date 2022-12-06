@@ -2,6 +2,7 @@ use kuska_ssb::{
     crypto::{ToSodiumObject, ToSsbId},
     keystore::OwnedIdentity,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::Result;
 

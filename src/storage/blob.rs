@@ -1,5 +1,3 @@
-use crate::broker::{BrokerEvent, ChBrokerSend, Destination};
-use sha2::{Digest, Sha256};
 use std::{
     fs::File,
     io::{Read, Result, Write},
@@ -7,6 +5,9 @@ use std::{
 };
 
 use futures::SinkExt;
+use sha2::{Digest, Sha256};
+
+use crate::broker::{BrokerEvent, ChBrokerSend, Destination};
 
 pub enum StoBlobEvent {
     Added(String),

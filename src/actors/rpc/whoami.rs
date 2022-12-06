@@ -2,14 +2,16 @@ use std::marker::PhantomData;
 
 use async_std::io::Write;
 use async_trait::async_trait;
-
 use kuska_ssb::{
     api::{ApiCaller, ApiMethod},
     rpc::RecvMsg,
 };
 
-use super::{RpcHandler, RpcInput};
-use crate::{broker::ChBrokerSend, Result};
+use crate::{
+    actors::rpc::handler::{RpcHandler, RpcInput},
+    broker::ChBrokerSend,
+    Result,
+};
 
 pub struct WhoAmIHandler<'a, W>
 where

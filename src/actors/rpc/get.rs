@@ -1,15 +1,17 @@
-use async_std::io::Write;
 use std::marker::PhantomData;
 
+use async_std::io::Write;
 use async_trait::async_trait;
 use kuska_ssb::{
     api::{ApiCaller, ApiMethod},
     rpc,
 };
 
-use crate::{broker::ChBrokerSend, Result, KV_STORAGE};
-
-use super::{RpcHandler, RpcInput};
+use crate::{
+    actors::rpc::handler::{RpcHandler, RpcInput},
+    broker::ChBrokerSend,
+    Result, KV_STORAGE,
+};
 
 pub struct GetHandler<W>
 where

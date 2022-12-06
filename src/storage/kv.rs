@@ -1,8 +1,8 @@
 use futures::SinkExt;
+use kuska_ssb::feed::{Feed, Message};
 use serde::{Deserialize, Serialize};
 
 use crate::broker::{BrokerEvent, ChBrokerSend, Destination};
-use kuska_ssb::feed::{Feed, Message};
 
 const PREFIX_LASTFEED: u8 = 0u8;
 const PREFIX_FEED: u8 = 1u8;

@@ -9,6 +9,8 @@ use log::warn;
 
 use crate::{broker::*, Result};
 
+/// Register the LAN discovery endpoint, send and receive UDP broadcasts and
+/// spawn a peer actor for each successfully parsed broadcast message.
 pub async fn actor(server_id: OwnedIdentity, rpc_port: u16) -> Result<()> {
     // Instantiate a new LAN broadcaster with the given public key and port.
     let broadcaster = LanBroadcast::new(&server_id.pk, rpc_port).await?;

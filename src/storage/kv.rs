@@ -1,13 +1,18 @@
 use futures::SinkExt;
-use kuska_ssb::feed::{Feed, Message};
+use kuska_ssb::feed::{Feed as MessageKVT, Message as MessageValue};
 use serde::{Deserialize, Serialize};
 
 use crate::broker::{BrokerEvent, ChBrokerSend, Destination};
 
-const PREFIX_LASTFEED: u8 = 0u8;
-const PREFIX_FEED: u8 = 1u8;
-const PREFIX_MESSAGE: u8 = 2u8;
+/// Prefix for a key to the latest sequence number for a stored feed.
+const PREFIX_LATEST_SEQ: u8 = 0u8;
+/// Prefix for a key to a message KVT (Key Value Timestamp).
+const PREFIX_MSG_KVT: u8 = 1u8;
+/// Prefix for a key to a message value (the 'V' in KVT).
+const PREFIX_MSG_VAL: u8 = 2u8;
+/// Prefix for a key to a blob.
 const PREFIX_BLOB: u8 = 3u8;
+/// Prefix for a key to a peer.
 const PREFIX_PEER: u8 = 4u8;
 
 #[derive(Debug, Clone)]
@@ -22,30 +27,23 @@ pub struct KvStorage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Blob {
+pub struct BlobStatus {
     retrieved: bool,
     users: Vec<String>,
 }
 
+/// The public key (ID) of a peer and a message sequence number.
 #[derive(Debug, Serialize, Deserialize)]
-struct FeedRef {
-    author: String,
-    seq_no: u64,
-}
-
-/// The public key (ID) and latest sequence number for a peer.
-/// The sequence number is sourced from the local database.
-/// In other words, it is the latest message we have received for that peer.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PeerLatestSequence {
-    id: String,
-    sequence: u64,
+pub struct PubKeyAndSeqNum {
+    pub_key: String,
+    seq_num: u64,
 }
 
 #[derive(Debug)]
 pub enum Error {
     InvalidSequence,
     Sled(sled::Error),
+    // TODO: not sure about renaming this.
     Feed(kuska_ssb::feed::Error),
     Cbor(serde_cbor::Error),
 }
@@ -78,41 +76,51 @@ impl std::error::Error for Error {}
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl KvStorage {
+    /// Open the key-value database using the given configuration and populate
+    /// the instance of `KvStorage` with the database and message-passing
+    /// sender.
     pub fn open(&mut self, config: sled::Config, ch_broker: ChBrokerSend) -> Result<()> {
         self.db = Some(config.open()?);
         self.ch_broker = Some(ch_broker);
         Ok(())
     }
 
-    fn key_lastfeed(user_id: &str) -> Vec<u8> {
+    /// Generate a key for the latest sequence number of the feed authored by
+    /// the given public key.
+    fn key_latest_seq(user_id: &str) -> Vec<u8> {
         let mut key = Vec::new();
-        key.push(PREFIX_LASTFEED);
+        key.push(PREFIX_LATEST_SEQ);
         key.extend_from_slice(user_id.as_bytes());
         key
     }
 
-    fn key_feed(user_id: &str, feed_seq: u64) -> Vec<u8> {
+    /// Generate a key for a message KVT authored by the given public key and
+    /// with the given message sequence number.
+    fn key_msg_kvt(user_id: &str, msg_seq: u64) -> Vec<u8> {
         let mut key = Vec::new();
-        key.push(PREFIX_FEED);
-        key.extend_from_slice(&feed_seq.to_be_bytes()[..]);
+        key.push(PREFIX_MSG_KVT);
+        key.extend_from_slice(&msg_seq.to_be_bytes()[..]);
         key.extend_from_slice(user_id.as_bytes());
         key
     }
 
-    fn key_message(message_id: &str) -> Vec<u8> {
+    /// Generate a key for a message value with the given ID (reference).
+    fn key_msg_val(msg_id: &str) -> Vec<u8> {
         let mut key = Vec::new();
-        key.push(PREFIX_MESSAGE);
-        key.extend_from_slice(message_id.as_bytes());
+        key.push(PREFIX_MSG_VAL);
+        key.extend_from_slice(msg_id.as_bytes());
         key
     }
 
-    fn key_blob(blob_hash: &str) -> Vec<u8> {
+    /// Generate a key for a blob with the given ID (reference).
+    fn key_blob(blob_id: &str) -> Vec<u8> {
         let mut key = Vec::new();
         key.push(PREFIX_BLOB);
-        key.extend_from_slice(blob_hash.as_bytes());
+        key.extend_from_slice(blob_id.as_bytes());
         key
     }
 
+    /// Generate a key for a peer with the given public key.
     fn key_peer(user_id: &str) -> Vec<u8> {
         let mut key = Vec::new();
         key.push(PREFIX_PEER);
@@ -120,22 +128,26 @@ impl KvStorage {
         key
     }
 
-    pub fn get_blob(&self, blob_hash: &str) -> Result<Option<Blob>> {
+    /// Get the status of a blob with the given ID.
+    pub fn get_blob(&self, blob_id: &str) -> Result<Option<BlobStatus>> {
         let db = self.db.as_ref().unwrap();
-        if let Some(raw) = db.get(Self::key_blob(blob_hash))? {
+        if let Some(raw) = db.get(Self::key_blob(blob_id))? {
             Ok(serde_cbor::from_slice(&raw)?)
         } else {
             Ok(None)
         }
     }
 
-    pub fn set_blob(&self, blob_hash: &str, blob: &Blob) -> Result<()> {
+    /// Set the status of a blob with the given ID.
+    pub fn set_blob(&self, blob_id: &str, blob: &BlobStatus) -> Result<()> {
         let db = self.db.as_ref().unwrap();
         let raw = serde_cbor::to_vec(blob)?;
-        db.insert(Self::key_blob(blob_hash), raw)?;
+        db.insert(Self::key_blob(blob_id), raw)?;
+
         Ok(())
     }
 
+    /// Get a list of IDs for all blobs which have not yet been retrieved.
     pub fn get_pending_blobs(&self) -> Result<Vec<String>> {
         let mut list = Vec::new();
 
@@ -143,18 +155,21 @@ impl KvStorage {
         let scan_key: &[u8] = &[PREFIX_BLOB];
         for item in db.range(scan_key..) {
             let (k, v) = item?;
-            let blob: Blob = serde_cbor::from_slice(&v)?;
+            let blob: BlobStatus = serde_cbor::from_slice(&v)?;
             if !blob.retrieved {
                 list.push(String::from_utf8_lossy(&k[1..]).to_string());
             }
         }
+
         Ok(list)
     }
 
-    pub fn get_last_feed_no(&self, user_id: &str) -> Result<Option<u64>> {
+    /// Get the sequence number of the latest message in the feed authored by
+    /// the peer with the given public key.
+    pub fn get_latest_seq(&self, user_id: &str) -> Result<Option<u64>> {
         let db = self.db.as_ref().unwrap();
-        let key = Self::key_lastfeed(user_id);
-        let count = if let Some(value) = db.get(&key)? {
+        let key = Self::key_latest_seq(user_id);
+        let seq = if let Some(value) = db.get(&key)? {
             let mut u64_buffer = [0u8; 8];
             u64_buffer.copy_from_slice(&value);
             Some(u64::from_be_bytes(u64_buffer))
@@ -162,25 +177,28 @@ impl KvStorage {
             None
         };
 
-        Ok(count)
+        Ok(seq)
     }
 
-    pub fn get_feed(&self, user_id: &str, feed_seq: u64) -> Result<Option<Feed>> {
+    /// Get the message KVT (Key Value Timestamp) for the given message ID
+    /// (key).
+    pub fn get_msg_kvt(&self, user_id: &str, msg_seq: u64) -> Result<Option<MessageKVT>> {
         let db = self.db.as_ref().unwrap();
-        if let Some(raw) = db.get(Self::key_feed(user_id, feed_seq))? {
-            Ok(Some(Feed::from_slice(&raw)?))
+        if let Some(raw) = db.get(Self::key_msg_kvt(user_id, msg_seq))? {
+            Ok(Some(MessageKVT::from_slice(&raw)?))
         } else {
             Ok(None)
         }
     }
 
-    pub fn get_message(&self, msg_id: &str) -> Result<Option<Message>> {
+    /// Get the message value for the given message ID (key).
+    pub fn get_msg_val(&self, msg_id: &str) -> Result<Option<MessageValue>> {
         let db = self.db.as_ref().unwrap();
 
-        if let Some(raw) = db.get(Self::key_message(msg_id))? {
-            let feed_ref = serde_cbor::from_slice::<FeedRef>(&raw)?;
+        if let Some(raw) = db.get(Self::key_msg_val(msg_id))? {
+            let msg_ref = serde_cbor::from_slice::<PubKeyAndSeqNum>(&raw)?;
             let msg = self
-                .get_feed(&feed_ref.author, feed_ref.seq_no)?
+                .get_msg_kvt(&msg_ref.pub_key, msg_ref.seq_num)?
                 .unwrap()
                 .into_message()?;
             Ok(Some(msg))
@@ -189,14 +207,19 @@ impl KvStorage {
         }
     }
 
-    pub fn get_last_message(&self, user_id: &str) -> Result<Option<Message>> {
-        let last_msg = if let Some(last_id) = self.get_last_feed_no(user_id)? {
-            Some(self.get_feed(user_id, last_id)?.unwrap().into_message()?)
+    /// Get the latest message value authored by the given public key.
+    pub fn get_latest_msg_val(&self, user_id: &str) -> Result<Option<MessageValue>> {
+        let latest_msg = if let Some(last_id) = self.get_latest_seq(user_id)? {
+            Some(
+                self.get_msg_kvt(user_id, last_id)?
+                    .unwrap()
+                    .into_message()?,
+            )
         } else {
             None
         };
 
-        Ok(last_msg)
+        Ok(latest_msg)
     }
 
     /// Add the public key and latest sequence number of a peer to the list of
@@ -214,54 +237,61 @@ impl KvStorage {
 
     /// Return the public key and latest sequence number for all peers in the
     /// database.
-    pub async fn get_peers(&self) -> Result<Vec<PeerLatestSequence>> {
+    pub async fn get_peers(&self) -> Result<Vec<PubKeyAndSeqNum>> {
         let db = self.db.as_ref().unwrap();
         let mut peers = Vec::new();
 
         // Use the generic peer prefix to return an iterator over all peers.
-        for (peer_key, _) in db.scan_prefix(&[PREFIX_PEER]).flatten() {
+        let scan_peer_key: &[u8] = &[PREFIX_PEER];
+        for peer in db.range(scan_peer_key..) {
+            let (peer_key, _) = peer?;
             // Drop the prefix byte and convert the remaining bytes to
             // a string.
-            let id = String::from_utf8(peer_key[1..].to_vec()).unwrap();
+            let pub_key = String::from_utf8_lossy(&peer_key[1..]).to_string();
             // Get the latest sequence number for the peer.
-            let sequence = self.get_last_feed_no(&id)?.map_or(0, |no| no) + 1;
-            let peer_latest_sequence = PeerLatestSequence { id, sequence };
+            let seq_num = self.get_latest_seq(&pub_key)?.map_or(0, |num| num) + 1;
+            let peer_latest_sequence = PubKeyAndSeqNum { pub_key, seq_num };
             peers.push(peer_latest_sequence)
         }
 
         Ok(peers)
     }
 
-    pub async fn append_feed(&self, msg: Message) -> Result<u64> {
-        let seq_no = self.get_last_feed_no(msg.author())?.map_or(0, |no| no) + 1;
+    /// Append a message value to a feed.
+    pub async fn append_feed(&self, msg_val: MessageValue) -> Result<u64> {
+        let seq_num = self.get_latest_seq(msg_val.author())?.map_or(0, |num| num) + 1;
 
         // TODO: We should really be performing more comprehensive validation.
-        if msg.sequence() != seq_no {
+        // Are there other checks in place behind the scenes?
+        if msg_val.sequence() != seq_num {
             return Err(Error::InvalidSequence);
         }
 
-        let author = msg.author().to_owned();
+        let author = msg_val.author().to_owned();
         let db = self.db.as_ref().unwrap();
 
-        let feed_ref = serde_cbor::to_vec(&FeedRef {
-            author: author.clone(),
-            seq_no,
+        let msg_ref = serde_cbor::to_vec(&PubKeyAndSeqNum {
+            pub_key: author.clone(),
+            seq_num,
         })?;
-        db.insert(Self::key_message(&msg.id().to_string()), feed_ref)?;
+        db.insert(Self::key_msg_val(&msg_val.id().to_string()), msg_ref)?;
 
-        let feed = Feed::new(msg.clone());
-        db.insert(Self::key_feed(&author, seq_no), feed.to_string().as_bytes())?;
-        db.insert(Self::key_lastfeed(&author), &seq_no.to_be_bytes()[..])?;
+        let msg_kvt = MessageKVT::new(msg_val.clone());
+        db.insert(
+            Self::key_msg_kvt(&author, seq_num),
+            msg_kvt.to_string().as_bytes(),
+        )?;
+        db.insert(Self::key_latest_seq(&author), &seq_num.to_be_bytes()[..])?;
 
         // Add the public key and latest sequence number for this peer to the
         // list of peers.
-        self.set_peer(&author, seq_no).await?;
+        self.set_peer(&author, seq_num).await?;
 
         db.flush_async().await?;
 
         let broker_msg = BrokerEvent::new(
             Destination::Broadcast,
-            StoKvEvent::IdChanged(msg.author().clone()),
+            StoKvEvent::IdChanged(msg_val.author().clone()),
         );
 
         self.ch_broker
@@ -270,51 +300,61 @@ impl KvStorage {
             .send(broker_msg)
             .await
             .unwrap();
-        Ok(seq_no)
+
+        Ok(seq_num)
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use sled::Config as KvConfig;
 
     #[test]
     fn test_blobs() -> Result<()> {
         let mut kv = KvStorage::default();
         let (sender, _) = futures::channel::mpsc::unbounded();
         let path = tempdir::TempDir::new("solardb").unwrap();
-        kv.open(path.path(), sender).unwrap();
+        let config = KvConfig::new().path(&path.path());
+        kv.open(config, sender).unwrap();
+
         assert_eq!(true, kv.get_blob("1").unwrap().is_none());
+
         kv.set_blob(
             "b1",
-            &Blob {
+            &BlobStatus {
                 retrieved: true,
                 users: ["u1".to_string()].to_vec(),
             },
         )
         .unwrap();
+
         kv.set_blob(
             "b2",
-            &Blob {
+            &BlobStatus {
                 retrieved: false,
                 users: ["u2".to_string()].to_vec(),
             },
         )
         .unwrap();
+
         let blob = kv.get_blob("b1").unwrap().unwrap();
+
         assert_eq!(blob.retrieved, true);
         assert_eq!(blob.users, ["u1".to_string()].to_vec());
         assert_eq!(kv.get_pending_blobs().unwrap(), ["b2".to_string()].to_vec());
 
         kv.set_blob(
             "b1",
-            &Blob {
+            &BlobStatus {
                 retrieved: false,
                 users: ["u7".to_string()].to_vec(),
             },
         )
         .unwrap();
+
         let blob = kv.get_blob("b1").unwrap().unwrap();
+
         assert_eq!(blob.retrieved, false);
         assert_eq!(blob.users, ["u7".to_string()].to_vec());
         assert_eq!(

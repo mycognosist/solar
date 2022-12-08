@@ -112,8 +112,8 @@ where
 
             for peer in &REPLICATION_CONFIG.get().unwrap().peers {
                 let mut args = dto::CreateHistoryStreamIn::new(peer.to_string()).live(true);
-                if let Some(last_feed) = KV_STORAGE.read().await.get_last_feed_no(peer)? {
-                    args = args.after_seq(last_feed);
+                if let Some(last_seq) = KV_STORAGE.read().await.get_latest_seq(peer)? {
+                    args = args.after_seq(last_seq);
                 }
                 let id = api.create_history_stream_req_send(&args).await?;
                 self.peers.insert(id, peer.to_string());
@@ -150,13 +150,13 @@ where
     ) -> Result<bool> {
         if self.peers.contains_key(&req_no) {
             let msg = Message::from_slice(res)?;
-            let last_feed = KV_STORAGE
+            let last_seq = KV_STORAGE
                 .read()
                 .await
-                .get_last_feed_no(&msg.author().to_string())?
+                .get_latest_seq(&msg.author().to_string())?
                 .unwrap_or(0);
 
-            if msg.sequence() == last_feed + 1 {
+            if msg.sequence() == last_seq + 1 {
                 KV_STORAGE.write().await.append_feed(msg.clone()).await?;
 
                 info!("Received {} msg no {}", msg.author(), msg.sequence());
@@ -177,7 +177,7 @@ where
                     "Received message out of order {} recv:{} db:{}",
                     &msg.author().to_string(),
                     msg.sequence(),
-                    last_feed
+                    last_seq
                 );
             }
             Ok(true)
@@ -268,20 +268,20 @@ where
             format!("@{}", req.args.id).to_string()
         };
 
-        let last = KV_STORAGE
+        let last_seq = KV_STORAGE
             .read()
             .await
-            .get_last_feed_no(&req_id)?
+            .get_latest_seq(&req_id)?
             .map_or(0, |x| x + 1);
         let with_keys = req.args.keys.unwrap_or(true);
 
         info!(
             "Sending history stream {} ({}..{})",
-            req.args.id, req.from, last
+            req.args.id, req.from, last_seq
         );
 
-        for n in req.from..last {
-            let data = KV_STORAGE.read().await.get_feed(&req_id, n)?.unwrap();
+        for n in req.from..last_seq {
+            let data = KV_STORAGE.read().await.get_msg_kvt(&req_id, n)?.unwrap();
             let data = if with_keys {
                 data.to_string()
             } else {
@@ -290,7 +290,7 @@ where
             api.feed_res_send(req.req_no, &data).await?;
         }
 
-        req.from = last;
+        req.from = last_seq;
 
         Ok(())
     }

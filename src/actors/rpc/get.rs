@@ -70,8 +70,8 @@ where
     ) -> Result<bool> {
         let args: Vec<String> = serde_json::from_value(req.args.clone())?;
 
-        let msg = KV_STORAGE.read().await.get_message(&args[0]);
-        match msg {
+        let msg_val = KV_STORAGE.read().await.get_msg_val(&args[0]);
+        match msg_val {
             Ok(Some(msg)) => api.get_res_send(req_no, &msg).await?,
             Ok(None) => {
                 api.rpc()

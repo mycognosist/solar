@@ -61,7 +61,7 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
             // Lookup the last message published on the local feed.
             // Return `None` if no messages have yet been published on the feed.
             let last_msg = db
-                .get_last_message(&server_id.id)
+                .get_latest_msg_val(&server_id.id)
                 // Map the error to a variant of our crate-specific error type.
                 // The `?` operator then performs the `From` conversion to
                 // the `jsonrpc_core::Error` type if an error occurs.

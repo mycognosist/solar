@@ -8,6 +8,7 @@ const PREFIX_LASTFEED: u8 = 0u8;
 const PREFIX_FEED: u8 = 1u8;
 const PREFIX_MESSAGE: u8 = 2u8;
 const PREFIX_BLOB: u8 = 3u8;
+const PREFIX_PEER: u8 = 4u8;
 
 #[derive(Debug, Clone)]
 pub enum StoKvEvent {
@@ -30,6 +31,15 @@ pub struct Blob {
 struct FeedRef {
     author: String,
     seq_no: u64,
+}
+
+/// The public key (ID) and latest sequence number for a peer.
+/// The sequence number is sourced from the local database.
+/// In other words, it is the latest message we have received for that peer.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PeerLatestSequence {
+    id: String,
+    sequence: u64,
 }
 
 #[derive(Debug)]
@@ -74,17 +84,17 @@ impl KvStorage {
         Ok(())
     }
 
-    fn key_feed(user_id: &str, feed_seq: u64) -> Vec<u8> {
+    fn key_lastfeed(user_id: &str) -> Vec<u8> {
         let mut key = Vec::new();
-        key.push(PREFIX_FEED);
-        key.extend_from_slice(&feed_seq.to_be_bytes()[..]);
+        key.push(PREFIX_LASTFEED);
         key.extend_from_slice(user_id.as_bytes());
         key
     }
 
-    fn key_lastfeed(user_id: &str) -> Vec<u8> {
+    fn key_feed(user_id: &str, feed_seq: u64) -> Vec<u8> {
         let mut key = Vec::new();
-        key.push(PREFIX_LASTFEED);
+        key.push(PREFIX_FEED);
+        key.extend_from_slice(&feed_seq.to_be_bytes()[..]);
         key.extend_from_slice(user_id.as_bytes());
         key
     }
@@ -100,6 +110,13 @@ impl KvStorage {
         let mut key = Vec::new();
         key.push(PREFIX_BLOB);
         key.extend_from_slice(blob_hash.as_bytes());
+        key
+    }
+
+    fn key_peer(user_id: &str) -> Vec<u8> {
+        let mut key = Vec::new();
+        key.push(PREFIX_PEER);
+        key.extend_from_slice(user_id.as_bytes());
         key
     }
 
@@ -182,9 +199,43 @@ impl KvStorage {
         Ok(last_msg)
     }
 
+    /// Add the public key and latest sequence number of a peer to the list of
+    /// peers.
+    pub async fn set_peer(&self, user_id: &str, latest_seq: u64) -> Result<()> {
+        let db = self.db.as_ref().unwrap();
+        db.insert(Self::key_peer(user_id), &latest_seq.to_be_bytes()[..])?;
+
+        // TODO: Should we be flushing here?
+        // Flush may have a performance impact. It may also be unnecessary
+        // depending on where / when this method is called.
+
+        Ok(())
+    }
+
+    /// Return the public key and latest sequence number for all peers in the
+    /// database.
+    pub async fn get_peers(&self) -> Result<Vec<PeerLatestSequence>> {
+        let db = self.db.as_ref().unwrap();
+        let mut peers = Vec::new();
+
+        // Use the generic peer prefix to return an iterator over all peers.
+        for (peer_key, _) in db.scan_prefix(&[PREFIX_PEER]).flatten() {
+            // Drop the prefix byte and convert the remaining bytes to
+            // a string.
+            let id = String::from_utf8(peer_key[1..].to_vec()).unwrap();
+            // Get the latest sequence number for the peer.
+            let sequence = self.get_last_feed_no(&id)?.map_or(0, |no| no) + 1;
+            let peer_latest_sequence = PeerLatestSequence { id, sequence };
+            peers.push(peer_latest_sequence)
+        }
+
+        Ok(peers)
+    }
+
     pub async fn append_feed(&self, msg: Message) -> Result<u64> {
         let seq_no = self.get_last_feed_no(msg.author())?.map_or(0, |no| no) + 1;
 
+        // TODO: We should really be performing more comprehensive validation.
         if msg.sequence() != seq_no {
             return Err(Error::InvalidSequence);
         }
@@ -201,6 +252,10 @@ impl KvStorage {
         let feed = Feed::new(msg.clone());
         db.insert(Self::key_feed(&author, seq_no), feed.to_string().as_bytes())?;
         db.insert(Self::key_lastfeed(&author), &seq_no.to_be_bytes()[..])?;
+
+        // Add the public key and latest sequence number for this peer to the
+        // list of peers.
+        self.set_peer(&author, seq_no).await?;
 
         db.flush_async().await?;
 

@@ -35,6 +35,19 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
     // Return the public key of the local SSB server.
     io.add_sync_method("whoami", move |_| Ok(Value::String(local_pk.to_owned())));
 
+    // Return the public key and latest sequence number for all feeds in the
+    // local database.
+    io.add_sync_method("get_peers", |_| {
+        task::block_on(async {
+            let db = KV_STORAGE.read().await;
+            let peers = db.get_peers().await.map_err(Error::KV)?;
+
+            let response = json!(peers);
+
+            Ok(response)
+        })
+    });
+
     // Publish a typed message (raw).
     // Returns the key (hash) and sequence number of the published message.
     io.add_sync_method("publish", move |params: Params| {
@@ -43,11 +56,11 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
             let post_content: TypedMessage = params.parse()?;
 
             // Open the primary KV database for writing.
-            let feed_storage = KV_STORAGE.write().await;
+            let db = KV_STORAGE.write().await;
 
             // Lookup the last message published on the local feed.
             // Return `None` if no messages have yet been published on the feed.
-            let last_msg = feed_storage
+            let last_msg = db
                 .get_last_message(&server_id.id)
                 // Map the error to a variant of our crate-specific error type.
                 // The `?` operator then performs the `From` conversion to
@@ -59,10 +72,7 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
                 .map_err(Error::KuskaFeed)?;
 
             // Append the signed message to the feed.
-            let seq = feed_storage
-                .append_feed(msg.clone())
-                .await
-                .map_err(Error::KV)?;
+            let seq = db.append_feed(msg.clone()).await.map_err(Error::KV)?;
 
             info!(
                 "published message {} with sequence number {}",

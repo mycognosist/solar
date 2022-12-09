@@ -40,7 +40,7 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
     io.add_sync_method("get_peers", |_| {
         task::block_on(async {
             let db = KV_STORAGE.read().await;
-            let peers = db.get_peers().await.map_err(Error::KV)?;
+            let peers = db.get_peers().await?;
 
             let response = json!(peers);
 
@@ -60,19 +60,18 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
 
             // Lookup the last message published on the local feed.
             // Return `None` if no messages have yet been published on the feed.
-            let last_msg = db
-                .get_latest_msg_val(&server_id.id)
-                // Map the error to a variant of our crate-specific error type.
-                // The `?` operator then performs the `From` conversion to
-                // the `jsonrpc_core::Error` type if an error occurs.
-                .map_err(Error::KV)?;
+            let last_msg = db.get_latest_msg_val(&server_id.id)?;
+            // Map the error to a variant of our crate-specific error type.
+            // The `?` operator then performs the `From` conversion to
+            // the `jsonrpc_core::Error` type if an error occurs.
+            //.map_err(Error::SledDatabase)?;
 
             // Instantiate and cryptographically-sign a new message using `post`.
             let msg = Message::sign(last_msg.as_ref(), &server_id, json!(post_content))
-                .map_err(Error::KuskaFeed)?;
+                .map_err(Error::Validation)?;
 
             // Append the signed message to the feed.
-            let seq = db.append_feed(msg.clone()).await.map_err(Error::KV)?;
+            let seq = db.append_feed(msg.clone()).await?;
 
             info!(
                 "published message {} with sequence number {}",

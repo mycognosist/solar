@@ -2,7 +2,11 @@ use futures::SinkExt;
 use kuska_ssb::feed::{Feed as MessageKVT, Message as MessageValue};
 use serde::{Deserialize, Serialize};
 
-use crate::broker::{BrokerEvent, ChBrokerSend, Destination};
+use crate::{
+    broker::{BrokerEvent, ChBrokerSend, Destination},
+    error::Error,
+    Result,
+};
 
 /// Prefix for a key to the latest sequence number for a stored feed.
 const PREFIX_LATEST_SEQ: u8 = 0u8;
@@ -38,42 +42,6 @@ pub struct PubKeyAndSeqNum {
     pub_key: String,
     seq_num: u64,
 }
-
-#[derive(Debug)]
-pub enum Error {
-    InvalidSequence,
-    Sled(sled::Error),
-    // TODO: not sure about renaming this.
-    Feed(kuska_ssb::feed::Error),
-    Cbor(serde_cbor::Error),
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl From<sled::Error> for Error {
-    fn from(err: sled::Error) -> Self {
-        Error::Sled(err)
-    }
-}
-
-impl From<kuska_ssb::feed::Error> for Error {
-    fn from(err: kuska_ssb::feed::Error) -> Self {
-        Error::Feed(err)
-    }
-}
-
-impl From<serde_cbor::Error> for Error {
-    fn from(err: serde_cbor::Error) -> Self {
-        Error::Cbor(err)
-    }
-}
-
-impl std::error::Error for Error {}
-pub type Result<T> = std::result::Result<T, Error>;
 
 impl KvStorage {
     /// Open the key-value database using the given configuration and populate

@@ -21,6 +21,7 @@ where
     W: Write + Unpin + Send + Sync,
 {
     fn name(&self) -> &'static str;
+
     async fn handle(
         &mut self,
         api: &mut ApiCaller<W>,

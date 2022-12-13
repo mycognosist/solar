@@ -30,6 +30,7 @@ struct HistoryStreamRequest {
     from: u64, // check, not sure if ok
 }
 
+/// History stream handler. Tracks active requests and peer connections.
 pub struct HistoryStreamHandler<W>
 where
     W: Write + Unpin + Send + Sync,
@@ -83,6 +84,9 @@ where
             RpcInput::Message(msg) => {
                 if let Some(kv_event) = msg.downcast_ref::<StoKvEvent>() {
                     match kv_event {
+                        // Notification from the key-value store indicating that
+                        // a new message has just been appended to the feed
+                        // identified by `id`.
                         StoKvEvent::IdChanged(id) => {
                             return self.recv_storageevent_idchanged(api, id).await
                         }
@@ -123,8 +127,8 @@ where
 
             // Create a history stream request for the local feed.
             let args = dto::CreateHistoryStreamIn::new(SECRET_CONFIG.get().unwrap().id.clone());
-            // NOTE: I don't understand why this is being called.
-            // We are essentially requesting our own feed.
+            // TODO: I don't understand why this is being called.
+            // We are essentially requesting our own feed. Why?
             let _ = api.create_history_stream_req_send(&args).await?;
 
             // Loop through all peers in the replication list.
@@ -146,7 +150,7 @@ where
                 // (public key) into the peers hash map.
                 self.peers.insert(id, peer.to_string());
 
-                debug!(target: "solar", "requesting feeds from peer {} starting with {:?}", peer, args.seq);
+                debug!(target: "solar", "requesting messages authored by peer {} starting from {:?}", peer, args.seq);
             }
 
             self.initialized = true;
@@ -238,11 +242,9 @@ where
     ) -> Result<bool> {
         // Deserialize the args from an incoming history stream request.
         let mut args: Vec<dto::CreateHistoryStreamIn> = serde_json::from_value(req.args.clone())?;
-
-        // Why do we pop the args? Related: why do we deserialize into a
-        // vec in the first place?
-        // TODO: add some debug logging to understand this.
+        // Retrieve the `CreateHistoryStreamIn` args from the array.
         let args = args.pop().unwrap();
+
         // Define the sequence number for the history stream query.
         // This marks the first message in the sequence we will send to the
         // requester.
@@ -293,17 +295,21 @@ where
         }
     }
 
-    // TODO: figure out how / when this is used.
+    /// Respond to a key-value store state change for the given peer.
+    /// This is triggered when a new message is appended to the local feed.
+    /// Remove the peer from the list of active streams, send the requested
+    /// messages from the local feed to the peer and then reinsert the public
+    /// key of the peer to the list of active streams.
     async fn recv_storageevent_idchanged(
         &mut self,
         api: &mut ApiCaller<W>,
         id: &str,
     ) -> Result<bool> {
-        // If the given public key is in the list of active streams, remove it,
-        // send the requested messages from the local feed and then readd
-        // the public key to the list of active streams.
+        // Attempt to remove the peer from the list of active streams.
         if let Some(mut req) = self.reqs.remove(id) {
+            // Send local messages to the peer.
             self.send_history(api, &mut req).await?;
+            // Reinsert the peer into the list of active streams.
             self.reqs.insert(id.to_string(), req);
             Ok(true)
         } else {
@@ -345,7 +351,7 @@ where
         let with_keys = req.args.keys.unwrap_or(true);
 
         info!(
-            "Sending history stream to {} (from sequence {} to {})",
+            "sending history stream to {} (from sequence {} to {})",
             req.args.id, req.from, last_seq
         );
 

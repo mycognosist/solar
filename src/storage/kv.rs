@@ -257,6 +257,8 @@ impl KvStorage {
 
         db.flush_async().await?;
 
+        // Publish a notification that the feed belonging to the given public
+        // key has been updated.
         let broker_msg = BrokerEvent::new(
             Destination::Broadcast,
             StoKvEvent::IdChanged(msg_val.author().clone()),

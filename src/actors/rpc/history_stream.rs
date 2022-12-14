@@ -201,7 +201,11 @@ where
                 // Append the message to the feed.
                 KV_STORAGE.write().await.append_feed(msg.clone()).await?;
 
-                info!("Received msg no {} from {}", msg.author(), msg.sequence());
+                info!(
+                    "received msg number {} from {}",
+                    msg.author(),
+                    msg.sequence()
+                );
 
                 // Extract blob references from the received message and
                 // request those blobs if they are not already in the local
@@ -219,7 +223,7 @@ where
                 }
             } else {
                 warn!(
-                    "Received out-of-order message from {}; recv: {} db: {}",
+                    "received out-of-order msg from {}; recv: {} db: {}",
                     &msg.author().to_string(),
                     msg.sequence(),
                     last_seq
@@ -354,6 +358,9 @@ where
             "sending history stream to {} (from sequence {} to {})",
             req.args.id, req.from, last_seq
         );
+
+        // TODO: if req.from is greater than last_seq then we shouldn't send
+        // any messages (the requester is more up-to-date than we are).
 
         // Iterate over the range of requested messages, read them from the
         // local key-value database and send them to the requesting peer.

@@ -1,5 +1,6 @@
 use futures::SinkExt;
 use kuska_ssb::feed::{Feed as MessageKVT, Message as MessageValue};
+use log::warn;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -264,12 +265,15 @@ impl KvStorage {
             StoKvEvent::IdChanged(msg_val.author().clone()),
         );
 
-        self.ch_broker
-            .as_ref()
-            .unwrap()
-            .send(broker_msg)
-            .await
-            .unwrap();
+        // Matching on the error here (instead of unwrapping) allows us to
+        // write unit tests for `append_feed`; a case where we do not have
+        // a broker deployed to receive the event message.
+        if let Err(err) = self.ch_broker.as_ref().unwrap().send(broker_msg).await {
+            warn!(
+                "failed to notify broker of message appended to kv store: {}",
+                err
+            )
+        };
 
         Ok(seq_num)
     }
@@ -278,17 +282,120 @@ impl KvStorage {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    use kuska_ssb::api::dto::content::TypedMessage;
+    use serde_json::json;
     use sled::Config as KvConfig;
 
-    #[test]
-    fn test_blobs() -> Result<()> {
+    use crate::SecretConfig;
+
+    fn open_temporary_kv() -> KvStorage {
         let mut kv = KvStorage::default();
         let (sender, _) = futures::channel::mpsc::unbounded();
         let path = tempdir::TempDir::new("solardb").unwrap();
         let config = KvConfig::new().path(&path.path());
         kv.open(config, sender).unwrap();
+        kv
+    }
 
-        assert_eq!(true, kv.get_blob("1").unwrap().is_none());
+    // In reality this test covers more than just the append method.
+    // It tests multiple methods exposed by the kv database.
+    // The main reason for combining the tests is the cost of setting up
+    // testable conditions (ie. creating the keypair and database and
+    // it with messages). Perhaps this could be broken up in the future.
+    #[async_std::test]
+    async fn test_append_feed() -> Result<()> {
+        // Create a unique keypair to sign messages.
+        let keypair = SecretConfig::create().owned_identity().unwrap();
+
+        // Open a temporary key-value store.
+        let kv = open_temporary_kv();
+
+        // Create a post-type message.
+        let msg_content = TypedMessage::Post {
+            text: "A solar flare is an intense localized eruption of electromagnetic radiation."
+                .to_string(),
+            mentions: None,
+        };
+
+        // Lookup the value of the previous message. This will be `None`.
+        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+
+        // Sign the message content using the temporary keypair and value of
+        // the previous message.
+        let msg = MessageValue::sign(last_msg.as_ref(), &keypair, json!(msg_content)).unwrap();
+
+        // Append the signed message to the feed. Returns the sequence number
+        // of the appended message.
+        let seq = kv.append_feed(msg).await.unwrap();
+
+        // Ensure that the message is the first in the feed.
+        assert_eq!(seq, 1);
+
+        // Get the latest sequence number.
+        let latest_seq = kv.get_latest_seq(&keypair.id).unwrap();
+
+        // Ensure the stored sequence number matches that of the appended
+        // message.
+        assert!(latest_seq.is_some());
+        assert_eq!(latest_seq.unwrap(), seq);
+
+        // Create, sign and append a second post-type message.
+        let msg_content_2 = TypedMessage::Post {
+            text: "When the sun shone upon her.".to_string(),
+            mentions: None,
+        };
+        let last_msg_2 = kv.get_latest_msg_val(&keypair.id).unwrap();
+        let msg_2 =
+            MessageValue::sign(last_msg_2.as_ref(), &keypair, json!(msg_content_2)).unwrap();
+        let msg_2_clone = msg_2.clone();
+        let seq_2 = kv.append_feed(msg_2).await.unwrap();
+
+        // Ensure that the message is the second in the feed.
+        assert_eq!(seq_2, 2);
+
+        // Get the second message in the key-value store in the form of a KVT.
+        let msg_kvt = kv.get_msg_kvt(&keypair.id, 2).unwrap();
+        assert!(msg_kvt.is_some());
+
+        // Retrieve the key from the KVT.
+        let msg_kvt_key = msg_kvt.unwrap().key;
+
+        // Get the second message in the key-value store in the form of a value.
+        let msg_val = kv.get_msg_val(&msg_kvt_key).unwrap();
+
+        assert!(msg_val.is_some());
+        // Ensure the retrieved message value matches the previously created
+        // and signed message.
+        assert_eq!(msg_val.unwrap(), msg_2_clone);
+
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_peers() -> Result<()> {
+        // Open a temporary key-value store.
+        let kv = open_temporary_kv();
+
+        let peer_key = "@HEqy940T6uB+T+d9Jaa58aNfRzLx9eRWqkZljBmnkmk=.ed25519";
+        let peer_seq = 1;
+
+        kv.set_peer(peer_key, peer_seq).await.unwrap();
+
+        let peers = kv.get_peers().await.unwrap();
+
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].pub_key, peer_key);
+        assert_eq!(peers[0].seq_num, peer_seq);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_blobs() -> Result<()> {
+        let kv = open_temporary_kv();
+
+        assert!(kv.get_blob("1").unwrap().is_none());
 
         kv.set_blob(
             "b1",
@@ -296,8 +403,7 @@ mod test {
                 retrieved: true,
                 users: ["u1".to_string()].to_vec(),
             },
-        )
-        .unwrap();
+        )?;
 
         kv.set_blob(
             "b2",
@@ -305,12 +411,11 @@ mod test {
                 retrieved: false,
                 users: ["u2".to_string()].to_vec(),
             },
-        )
-        .unwrap();
+        )?;
 
-        let blob = kv.get_blob("b1").unwrap().unwrap();
+        let blob = kv.get_blob("b1")?.unwrap();
 
-        assert_eq!(blob.retrieved, true);
+        assert!(blob.retrieved);
         assert_eq!(blob.users, ["u1".to_string()].to_vec());
         assert_eq!(kv.get_pending_blobs().unwrap(), ["b2".to_string()].to_vec());
 
@@ -320,10 +425,9 @@ mod test {
                 retrieved: false,
                 users: ["u7".to_string()].to_vec(),
             },
-        )
-        .unwrap();
+        )?;
 
-        let blob = kv.get_blob("b1").unwrap().unwrap();
+        let blob = kv.get_blob("b1")?.unwrap();
 
         assert_eq!(blob.retrieved, false);
         assert_eq!(blob.users, ["u7".to_string()].to_vec());

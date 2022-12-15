@@ -62,10 +62,10 @@ operating system)._
 _Undergoing active development. Expect APIs to change._
 
 - [X] json-rpc server for user queries
+  - [X] peers
   - [X] ping
-  - [X] whoami
   - [X] publish
-  - [X] get_peers
+  - [X] whoami
   - [ ] ...
 - [ ] improved connection handler
 - [ ] ebt replication
@@ -83,10 +83,10 @@ The server currently supports HTTP.
 
 | Method | Parameters | Response | Description |
 | --- | --- | --- | --- |
+| `peers` | | `[{ "pub_key": "<@...=.ed25519>", "seq_num": <int> }` | Return the public key and latest sequence number for all peers in the local database |
 | `ping` | | `pong!` | Responds if the JSON-RPC server is running |
+| `publish` | `<content>` | `{ "msg_ref": "<%...=.sha256>", "seq_num": <int> }` | Publishes a message and returns the reference (message hash) and sequence number |
 | `whoami` | | `<@...=.ed25519>` | Returns the public key of the local node |
-| `publish` | `<content>` | `{ "msg_ref": "<%...=.sha256>", "seq": <int> }` | Publishes a message and returns the reference (message hash) and sequence number |
-| `get_peers` | | `[{ "pub_key": "<@...=.ed25519>", "seq_num": <int> }` | Return the public key and latest sequence number for all peers in the local database |
 
 `curl` can be used to invoke the available methods from the commandline:
 

@@ -218,7 +218,8 @@ impl KvStorage {
             // a string.
             let pub_key = String::from_utf8_lossy(&peer_key[1..]).to_string();
             // Get the latest sequence number for the peer.
-            let seq_num = self.get_latest_seq(&pub_key)?.map_or(0, |num| num) + 1;
+            // Fallback to a value of 0 if a `None` value is returned.
+            let seq_num = self.get_latest_seq(&pub_key)?.unwrap_or(0);
             let peer_latest_sequence = PubKeyAndSeqNum { pub_key, seq_num };
             peers.push(peer_latest_sequence)
         }
@@ -340,6 +341,18 @@ mod test {
         assert!(latest_seq.is_some());
         assert_eq!(latest_seq.unwrap(), seq);
 
+        // Get a list of all replicated peers and their latest sequence
+        // numbers. This list is expected to contain an entry for the
+        // local keypair.
+        let peers = kv.get_peers().await.unwrap();
+
+        // Ensure there is only one entry in the peers list.
+        assert_eq!(peers.len(), 1);
+        // Ensure the public key of the peer matches expectations and that
+        // the sequence number is correct.
+        assert_eq!(peers[0].pub_key, keypair.id);
+        assert_eq!(peers[0].seq_num, 1);
+
         // Create, sign and append a second post-type message.
         let msg_content_2 = TypedMessage::Post {
             text: "When the sun shone upon her.".to_string(),
@@ -368,25 +381,6 @@ mod test {
         // Ensure the retrieved message value matches the previously created
         // and signed message.
         assert_eq!(msg_val.unwrap(), msg_2_clone);
-
-        Ok(())
-    }
-
-    #[async_std::test]
-    async fn test_peers() -> Result<()> {
-        // Open a temporary key-value store.
-        let kv = open_temporary_kv();
-
-        let peer_key = "@HEqy940T6uB+T+d9Jaa58aNfRzLx9eRWqkZljBmnkmk=.ed25519";
-        let peer_seq = 1;
-
-        kv.set_peer(peer_key, peer_seq).await.unwrap();
-
-        let peers = kv.get_peers().await.unwrap();
-
-        assert_eq!(peers.len(), 1);
-        assert_eq!(peers[0].pub_key, peer_key);
-        assert_eq!(peers[0].seq_num, peer_seq);
 
         Ok(())
     }

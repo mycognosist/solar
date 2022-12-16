@@ -37,7 +37,7 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
 
     // Return the public key and latest sequence number for all feeds in the
     // local database.
-    io.add_sync_method("get_peers", |_| {
+    io.add_sync_method("peers", |_| {
         task::block_on(async {
             let db = KV_STORAGE.read().await;
             let peers = db.get_peers().await?;
@@ -79,7 +79,7 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
                 seq
             );
 
-            let response = json![{ "msg_ref": msg.id().to_string(), "seq": seq }];
+            let response = json![{ "msg_ref": msg.id().to_string(), "seq_num": seq }];
 
             Ok(response)
         })

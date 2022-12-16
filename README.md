@@ -49,11 +49,11 @@ operating system)._
 - [X] automatic feed generation
 - [X] minimal [sled](https://github.com/spacejam/sled) database to store generate feeds
 - [X] mux-rpc implementation
-  - [X] `whoami`
-  - [X] `get`
-  - [X] `createHistoryStream`
   - [X] `blobs createWants`
   - [X] `blobs get`
+  - [X] `createHistoryStream`
+  - [X] `get`
+  - [X] `whoami`
   - [X] [patchwork](https://github.com/ssbc/patchwork) and [go-ssb](https://github.com/ssbc/go-ssb) interoperability
 - [X] legacy replication (using `createHistoryStream`)
 
@@ -62,6 +62,7 @@ operating system)._
 _Undergoing active development. Expect APIs to change._
 
 - [X] json-rpc server for user queries
+  - [X] message
   - [X] peers
   - [X] ping
   - [X] publish
@@ -83,6 +84,7 @@ The server currently supports HTTP.
 
 | Method | Parameters | Response | Description |
 | --- | --- | --- | --- |
+| `message` | `{ "msg_ref": <key> }` | `{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }` | Return a single message KVT (key, value, timestamp) from the local database |
 | `peers` | | `[{ "pub_key": "<@...=.ed25519>", "seq_num": <int> }` | Return the public key and latest sequence number for all peers in the local database |
 | `ping` | | `pong!` | Responds if the JSON-RPC server is running |
 | `publish` | `<content>` | `{ "msg_ref": "<%...=.sha256>", "seq_num": <int> }` | Publishes a message and returns the reference (message hash) and sequence number |

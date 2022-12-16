@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use futures::SinkExt;
 use kuska_ssb::{
     api::{dto, ApiCaller, ApiMethod},
-    feed::Message,
+    feed::{Feed as MessageKvt, Message},
     rpc,
 };
 use log::{debug, info, warn};
@@ -16,7 +16,7 @@ use crate::{
     actors::rpc::handler::{RpcHandler, RpcInput},
     broker::{BrokerEvent, ChBrokerSend, Destination},
     storage::kv::StoKvEvent,
-    Result, BLOB_STORAGE, KV_STORAGE, REPLICATION_CONFIG, SECRET_CONFIG,
+    Result, BLOB_STORAGE, KV_STORAGE, REPLICATION_CONFIG,
 };
 
 /// Regex pattern used to match blob references.
@@ -123,13 +123,17 @@ where
     /// requesting the latest messages.
     async fn on_timer(&mut self, api: &mut ApiCaller<W>) -> Result<bool> {
         if !self.initialized {
-            debug!(target: "solar", "initializing historystreamhandler");
+            debug!("initializing history stream handler");
 
-            // Create a history stream request for the local feed.
-            let args = dto::CreateHistoryStreamIn::new(SECRET_CONFIG.get().unwrap().id.clone());
             // TODO: I don't understand why this is being called.
             // We are essentially requesting our own feed. Why?
-            let _ = api.create_history_stream_req_send(&args).await?;
+            // Leaving the code here for now until I understand it.
+            // “Don't ever take a fence down until you know the
+            // reason it was put up.” - G. K. Chesterton.
+
+            // Create a history stream request for the local feed.
+            //let args = dto::CreateHistoryStreamIn::new(SECRET_CONFIG.get().unwrap().id.clone());
+            //let _ = api.create_history_stream_req_send(&args).await?;
 
             // Loop through all peers in the replication list.
             for peer in &REPLICATION_CONFIG.get().unwrap().peers {
@@ -150,7 +154,10 @@ where
                 // (public key) into the peers hash map.
                 self.peers.insert(id, peer.to_string());
 
-                debug!(target: "solar", "requesting messages authored by peer {} starting from {:?}", peer, args.seq);
+                info!(
+                    "requesting messages authored by peer {} after {:?}",
+                    peer, args.seq
+                );
             }
 
             self.initialized = true;
@@ -186,8 +193,16 @@ where
     ) -> Result<bool> {
         // Only handle the response if we made the request.
         if self.peers.contains_key(&req_no) {
-            // Deserialize a message value from the response.
-            let msg = Message::from_slice(res)?;
+            // First try to deserialize the response into a message value.
+            // If that fails, try to deserialize into a message KVT and then
+            // convert that into a message value. Return an error if that fails.
+            // This approach allows us to handle the unlikely event that
+            // messages are sent as KVTs and not simply values.
+            let msg = match Message::from_slice(res) {
+                Ok(msg) => msg,
+                Err(_) => MessageKvt::from_slice(res)?.into_message()?,
+            };
+
             // Retrieve the sequence number of the most recent message for
             // the peer that authored the received message.
             let last_seq = KV_STORAGE
@@ -203,8 +218,8 @@ where
 
                 info!(
                     "received msg number {} from {}",
-                    msg.author(),
-                    msg.sequence()
+                    msg.sequence(),
+                    msg.author()
                 );
 
                 // Extract blob references from the received message and
@@ -249,9 +264,7 @@ where
         // Retrieve the `CreateHistoryStreamIn` args from the array.
         let args = args.pop().unwrap();
 
-        // Define the sequence number for the history stream query.
-        // This marks the first message in the sequence we will send to the
-        // requester.
+        // Define the first message in the sequence to be sent to the requester.
         let from = args.seq.unwrap_or(1u64);
 
         let mut req = HistoryStreamRequest { args, from, req_no };
@@ -336,7 +349,7 @@ where
         api: &mut ApiCaller<W>,
         req: &mut HistoryStreamRequest,
     ) -> Result<()> {
-        // Determine the public key of the peer requesting the feed.
+        // Determine the public key of the feed being requested.
         let req_id = if req.args.id.starts_with('@') {
             req.args.id.clone()
         } else {
@@ -349,34 +362,47 @@ where
             .read()
             .await
             .get_latest_seq(&req_id)?
-            .map_or(0, |x| x + 1);
+            .unwrap_or(0);
+
         // Determine if the messages should be sent as message values or as
         // message KVTs (Key Value Timestamp).
-        let with_keys = req.args.keys.unwrap_or(true);
+        // Defaults to message values if unset.
+        let with_keys = req.args.keys.unwrap_or(false);
 
-        info!(
-            "sending history stream to {} (from sequence {} to {})",
-            req.args.id, req.from, last_seq
-        );
+        // Only send messages that the peer doesn't already have
+        // (ie. if the requested `from` sequence number is smaller than or
+        // equal to the latest sequence number for that feed in the local
+        // database).
+        if req.from <= last_seq {
+            // Determine the public key of the peer who requested the history
+            // stream.
+            let requester = self
+                .find_key_by_req_no(req.req_no)
+                .unwrap_or_else(|| "unknown".to_string());
 
-        // TODO: if req.from is greater than last_seq then we shouldn't send
-        // any messages (the requester is more up-to-date than we are).
+            info!(
+                "sending messages authored by {} to {} (from sequence {} to {})",
+                req.args.id, requester, req.from, last_seq
+            );
 
-        // Iterate over the range of requested messages, read them from the
-        // local key-value database and send them to the requesting peer.
-        for n in req.from..last_seq {
-            let data = KV_STORAGE.read().await.get_msg_kvt(&req_id, n)?.unwrap();
-            // Send either the whole KVT or just the value.
-            let data = if with_keys {
-                data.to_string()
-            } else {
-                data.value.to_string()
-            };
-            api.feed_res_send(req.req_no, &data).await?;
+            // Iterate over the range of requested messages, read them from the
+            // local key-value database and send them to the requesting peer.
+            // The "to" value (`last_seq`) is exclusive so we need to add one to
+            // include it in the range.
+            for n in req.from..(last_seq + 1) {
+                let data = KV_STORAGE.read().await.get_msg_kvt(&req_id, n)?.unwrap();
+                // Send either the whole KVT or just the value.
+                let data = if with_keys {
+                    data.to_string()
+                } else {
+                    data.value.to_string()
+                };
+                api.feed_res_send(req.req_no, &data).await?;
+            }
+
+            // Update the starting sequence number for the request.
+            req.from = last_seq;
         }
-
-        // Update the starting sequence number for the request.
-        req.from = last_seq;
 
         Ok(())
     }

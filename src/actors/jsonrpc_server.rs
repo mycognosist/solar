@@ -20,6 +20,12 @@ struct MsgRef {
     msg_ref: String,
 }
 
+/// The public key (ID) of a peer.
+#[derive(Debug, Deserialize)]
+struct PubKey {
+    pub_key: String,
+}
+
 /// Register the JSON-RPC server endpoint, define the JSON-RPC methods
 /// and spawn the server.
 ///
@@ -36,22 +42,20 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
 
     let mut io = IoHandler::default();
 
-    // Simple `ping` endpoint.
-    io.add_sync_method("ping", |_| Ok(Value::String("pong!".to_owned())));
-
-    let local_pk = server_id.id.clone();
-
-    // Return the public key of the local SSB server.
-    io.add_sync_method("whoami", move |_| Ok(Value::String(local_pk.to_owned())));
-
-    // Return the public key and latest sequence number for all feeds in the
-    // local database.
-    io.add_sync_method("peers", |_| {
+    // Retrieve a feed by public key.
+    // Returns an array of messages as a KVTs.
+    io.add_sync_method("feed", move |params: Params| {
         task::block_on(async {
-            let db = KV_STORAGE.read().await;
-            let peers = db.get_peers().await?;
+            // Parse the parameter containing the public key.
+            let pub_key: PubKey = params.parse()?;
 
-            let response = json!(peers);
+            // Open the primary KV database for reading.
+            let db = KV_STORAGE.read().await;
+
+            // Retrieve the message value for the requested message.
+            let feed = db.get_feed(&pub_key.pub_key)?;
+
+            let response = json!(feed);
 
             Ok(response)
         })
@@ -83,6 +87,26 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
             Ok(response)
         })
     });
+
+    // Return the public key and latest sequence number for all feeds in the
+    // local database.
+    io.add_sync_method("peers", |_| {
+        task::block_on(async {
+            let db = KV_STORAGE.read().await;
+            let peers = db.get_peers().await?;
+
+            let response = json!(peers);
+
+            Ok(response)
+        })
+    });
+
+    // Simple `ping` endpoint.
+    io.add_sync_method("ping", |_| Ok(Value::String("pong!".to_owned())));
+
+    // Clone the local public key (ID) so it can later be captured by the
+    // `whoami` closure.
+    let local_pk = server_id.id.clone();
 
     // Publish a typed message (raw).
     // Returns the key (hash) and sequence number of the published message.
@@ -120,6 +144,9 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
             Ok(response)
         })
     });
+
+    // Return the public key of the local SSB server.
+    io.add_sync_method("whoami", move |_| Ok(Value::String(local_pk.to_owned())));
 
     let server_addr = format!("0.0.0.0:{}", port);
     let server = ServerBuilder::new(io)

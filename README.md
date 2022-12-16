@@ -62,6 +62,7 @@ operating system)._
 _Undergoing active development. Expect APIs to change._
 
 - [X] json-rpc server for user queries
+  - [X] feed
   - [X] message
   - [X] peers
   - [X] ping
@@ -84,6 +85,7 @@ The server currently supports HTTP.
 
 | Method | Parameters | Response | Description |
 | --- | --- | --- | --- |
+| `feed` | `{ "pub_key": "<@...=.ed25519>" }` | `[{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }]` | Return an array of message KVTs (key, value, timestamp) from the local database |
 | `message` | `{ "msg_ref": <key> }` | `{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }` | Return a single message KVT (key, value, timestamp) from the local database |
 | `peers` | | `[{ "pub_key": "<@...=.ed25519>", "seq_num": <int> }` | Return the public key and latest sequence number for all peers in the local database |
 | `ping` | | `pong!` | Responds if the JSON-RPC server is running |

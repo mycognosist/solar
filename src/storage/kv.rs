@@ -1,5 +1,5 @@
 use futures::SinkExt;
-use kuska_ssb::feed::{Feed as MessageKVT, Message as MessageValue};
+use kuska_ssb::feed::{Feed as MessageKvt, Message as MessageValue};
 use log::warn;
 use serde::{Deserialize, Serialize};
 
@@ -149,12 +149,12 @@ impl KvStorage {
         Ok(seq)
     }
 
-    /// Get the message KVT (Key Value Timestamp) for the given message ID
-    /// (key).
-    pub fn get_msg_kvt(&self, user_id: &str, msg_seq: u64) -> Result<Option<MessageKVT>> {
+    /// Get the message KVT (Key Value Timestamp) for the given author and
+    /// message sequence number.
+    pub fn get_msg_kvt(&self, user_id: &str, msg_seq: u64) -> Result<Option<MessageKvt>> {
         let db = self.db.as_ref().unwrap();
         if let Some(raw) = db.get(Self::key_msg_kvt(user_id, msg_seq))? {
-            Ok(Some(MessageKVT::from_slice(&raw)?))
+            Ok(Some(MessageKvt::from_slice(&raw)?))
         } else {
             Ok(None)
         }
@@ -246,7 +246,7 @@ impl KvStorage {
         })?;
         db.insert(Self::key_msg_val(&msg_val.id().to_string()), msg_ref)?;
 
-        let msg_kvt = MessageKVT::new(msg_val.clone());
+        let msg_kvt = MessageKvt::new(msg_val.clone());
         db.insert(
             Self::key_msg_kvt(&author, seq_num),
             msg_kvt.to_string().as_bytes(),
@@ -277,6 +277,25 @@ impl KvStorage {
         };
 
         Ok(seq_num)
+    }
+
+    /// Get all messages comprising the feed authored by the given public key.
+    pub fn get_feed(&self, user_id: &str) -> Result<Vec<MessageKvt>> {
+        let mut feed = Vec::new();
+
+        // Lookup the latest sequence number for the given peer.
+        if let Some(latest_seq) = self.get_latest_seq(user_id)? {
+            // Iterate through the messages in the feed.
+            for msg_seq in 1..latest_seq {
+                // Get the message KVT for the given author and message
+                // sequence number and add it to the feed vector.
+                // TODO: consider handling the `None` case instead of
+                // unwrapping.
+                feed.push(self.get_msg_kvt(user_id, msg_seq)?.unwrap())
+            }
+        }
+
+        Ok(feed)
     }
 }
 

@@ -7,9 +7,18 @@ use jsonrpc_http_server::{
 };
 use kuska_ssb::{api::dto::content::TypedMessage, feed::Message, keystore::OwnedIdentity};
 use log::{info, warn};
+use serde::Deserialize;
 use serde_json::json;
 
 use crate::{broker::*, error::Error, Result, KV_STORAGE};
+
+/// Message reference containing the key (sha256 hash) of a message.
+// This is used to parse the key from the parameters supplied to the `message`
+// endpoint.
+#[derive(Debug, Deserialize)]
+struct MsgRef {
+    key: String,
+}
 
 /// Register the JSON-RPC server endpoint, define the JSON-RPC methods
 /// and spawn the server.
@@ -43,6 +52,33 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
             let peers = db.get_peers().await?;
 
             let response = json!(peers);
+
+            Ok(response)
+        })
+    });
+
+    // Retrieve a message by key.
+    // Returns the message as a KVT.
+    io.add_sync_method("message", move |params: Params| {
+        task::block_on(async {
+            // Parse the parameter containing the message reference (key).
+            let msg_ref: MsgRef = params.parse()?;
+
+            // Open the primary KV database for reading.
+            let db = KV_STORAGE.read().await;
+
+            // Retrieve the message value for the requested message.
+            let msg_val = db.get_msg_val(&msg_ref.key)?;
+
+            // Retrieve the message KVT for the requested message using the
+            // author and sequence fields from the message value.
+            let msg_kvt = if let Some(val) = msg_val {
+                db.get_msg_kvt(val.author(), val.sequence())?
+            } else {
+                None
+            };
+
+            let response = json!(msg_kvt);
 
             Ok(response)
         })

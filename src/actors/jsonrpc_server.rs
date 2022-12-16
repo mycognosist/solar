@@ -13,11 +13,11 @@ use serde_json::json;
 use crate::{broker::*, error::Error, Result, KV_STORAGE};
 
 /// Message reference containing the key (sha256 hash) of a message.
-// This is used to parse the key from the parameters supplied to the `message`
-// endpoint.
+/// Used to parse the key from the parameters supplied to the `message`
+/// endpoint.
 #[derive(Debug, Deserialize)]
 struct MsgRef {
-    key: String,
+    msg_ref: String,
 }
 
 /// Register the JSON-RPC server endpoint, define the JSON-RPC methods
@@ -68,7 +68,7 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
             let db = KV_STORAGE.read().await;
 
             // Retrieve the message value for the requested message.
-            let msg_val = db.get_msg_val(&msg_ref.key)?;
+            let msg_val = db.get_msg_val(&msg_ref.msg_ref)?;
 
             // Retrieve the message KVT for the requested message using the
             // author and sequence fields from the message value.

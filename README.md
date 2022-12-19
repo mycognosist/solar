@@ -14,9 +14,37 @@ message publishing and replication. Indexing of database messages will be
 offloaded to client applications (ie. piping feeds from solar into a SQLite
 database).
 
+## CLI
+
+Solar can be configured and launched using the CLI interface.
+
+`solar --help`
+
+```shell
+🌞 Solar 0.3.1-6266b38
+Sunbathing scuttlecrabs in kuskaland
+
+USAGE:
+    solar [OPTIONS]
+
+    FLAGS:
+        -h, --help       Prints help information
+        -V, --version    Prints version information
+
+    OPTIONS:
+        -c, --connect <connect>        Connect to peers (e.g. host:port:publickey, host:port:publickey)
+        -d, --data <data>              Where data is stored (default: ~/.local/share/local)
+        -j, --jsonrpc <jsonrpc>        Run the JSON-RPC server (default: true)
+        -l, --lan <lan>                Run LAN discovery (default: false)
+        -p, --port <port>              Port to bind (default: 8008)
+        -r, --replicate <replicate>    List of peers to replicate; "connect" magic word means that peers specified with
+                                       --connect are added to the replication list
+            --resync <resync>          Resync the local database by requesting the local feed from peers
+```
+
 ## Quick Start
 
-Clone the source and build the binary:
+Clone the source and build the binary (see [RPi build instructions](https://mycelial.technology/computers/rust-compilation.html) if required):
 
 ```
 git clone git@github.com:mycognosist/solar.git
@@ -55,6 +83,7 @@ operating system)._
   - [X] `get`
   - [X] `whoami`
   - [X] [patchwork](https://github.com/ssbc/patchwork) and [go-ssb](https://github.com/ssbc/go-ssb) interoperability
+- [X] resync local feed from peers
 - [X] legacy replication (using `createHistoryStream`)
 
 ## Extensions
@@ -71,13 +100,6 @@ _Undergoing active development. Expect APIs to change._
   - [ ] ...
 - [ ] improved connection handler
 - [ ] ebt replication
-
-## Documentation
-
-_Undergoing active development._
-
-- [ ] comprehensive doc comments
-- [ ] comprehensive code comments
 
 ## JSON-RPC API
 

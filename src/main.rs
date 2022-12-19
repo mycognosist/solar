@@ -43,6 +43,10 @@ struct Opt {
     /// Run the JSON-RPC server (default: true)
     #[structopt(short, long)]
     jsonrpc: Option<bool>,
+
+    /// Resync the local database by requesting the local feed from peers
+    #[structopt(long)]
+    resync: Option<bool>,
 }
 
 mod actors;
@@ -75,23 +79,28 @@ pub static BLOB_STORAGE: Lazy<Arc<RwLock<BlobStorage>>> =
 // This includes the public-private keypair.
 pub static SECRET_CONFIG: OnceCell<SecretConfig> = OnceCell::new();
 
-// Intstantiate the replication configuration.
+// Instantiate the replication configuration.
 // This is currently just a list of Scuttlebutt peers to replicate.
 pub static REPLICATION_CONFIG: OnceCell<ReplicationConfig> = OnceCell::new();
 
+// Instantiate the database resync configuration.
+pub static RESYNC_CONFIG: OnceCell<bool> = OnceCell::new();
+
 #[async_std::main]
 async fn main() -> Result<()> {
-    println!("🌞 Solar {}", env!("SOLAR_VERSION"));
-
     // Parse the CLI arguments.
     let opt = Opt::from_args();
 
     // Retrieve application configuration parameters from the parsed CLI input.
     // Set defaults if options have not been provided.
     let rpc_port = opt.port.unwrap_or(RPC_PORT);
+    let listen = format!("0.0.0.0:{}", rpc_port);
     let lan_discovery = opt.lan.unwrap_or(false);
     let jsonrpc_server = opt.jsonrpc.unwrap_or(true);
-    let listen = format!("0.0.0.0:{}", rpc_port);
+    let resync = opt.resync.unwrap_or(false);
+
+    // Set the value of the resync configuration cell.
+    let _err = RESYNC_CONFIG.set(resync);
 
     // Initialise the logger.
     env_logger::init();

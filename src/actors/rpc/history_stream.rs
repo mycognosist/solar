@@ -16,7 +16,7 @@ use crate::{
     actors::rpc::handler::{RpcHandler, RpcInput},
     broker::{BrokerEvent, ChBrokerSend, Destination},
     storage::kv::StoKvEvent,
-    Result, BLOB_STORAGE, KV_STORAGE, REPLICATION_CONFIG,
+    Result, BLOB_STORAGE, KV_STORAGE, REPLICATION_CONFIG, RESYNC_CONFIG, SECRET_CONFIG,
 };
 
 /// Regex pattern used to match blob references.
@@ -125,15 +125,19 @@ where
         if !self.initialized {
             debug!("initializing history stream handler");
 
-            // TODO: I don't understand why this is being called.
-            // We are essentially requesting our own feed. Why?
-            // Leaving the code here for now until I understand it.
-            // “Don't ever take a fence down until you know the
-            // reason it was put up.” - G. K. Chesterton.
+            // If local database resync has been selected...
+            if *RESYNC_CONFIG.get().unwrap() {
+                info!("database resync selected; requesting local feed from peers");
+                // Read the local public key from the secret config file.
+                let local_id = &SECRET_CONFIG.get().unwrap().id;
+                // Create a history stream request for the local feed.
+                let args = dto::CreateHistoryStreamIn::new(local_id.clone()).after_seq(1);
+                let req_id = api.create_history_stream_req_send(&args).await?;
 
-            // Create a history stream request for the local feed.
-            //let args = dto::CreateHistoryStreamIn::new(SECRET_CONFIG.get().unwrap().id.clone());
-            //let _ = api.create_history_stream_req_send(&args).await?;
+                // Insert the history stream request ID and peer ID
+                // (public key) into the peers hash map.
+                self.peers.insert(req_id, local_id.to_string());
+            }
 
             // Loop through all peers in the replication list.
             for peer in &REPLICATION_CONFIG.get().unwrap().peers {

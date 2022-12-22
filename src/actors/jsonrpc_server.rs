@@ -31,7 +31,7 @@ struct PubKey {
 ///
 /// Listens for a termination signal from the broker. When received, the
 /// JSON-RPC server is closed and a terminated signal is sent to the broker.
-pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
+pub async fn actor(server_id: OwnedIdentity, server_addr: String) -> Result<()> {
     let broker = BROKER
         .lock()
         .await
@@ -148,7 +148,6 @@ pub async fn actor(server_id: OwnedIdentity, port: u16) -> Result<()> {
     // Return the public key of the local SSB server.
     io.add_sync_method("whoami", move |_| Ok(Value::String(local_pk.to_owned())));
 
-    let server_addr = format!("0.0.0.0:{}", port);
     let server = ServerBuilder::new(io)
         .cors(DomainsValidation::AllowOnly(vec![
             AccessControlAllowOrigin::Null,

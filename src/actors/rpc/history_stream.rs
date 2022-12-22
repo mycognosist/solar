@@ -15,8 +15,9 @@ use regex::Regex;
 use crate::{
     actors::rpc::handler::{RpcHandler, RpcInput},
     broker::{BrokerEvent, ChBrokerSend, Destination},
+    config::{REPLICATION_CONFIG, RESYNC_CONFIG, SECRET_CONFIG},
     storage::kv::StoKvEvent,
-    Result, BLOB_STORAGE, KV_STORAGE, REPLICATION_CONFIG, RESYNC_CONFIG, SECRET_CONFIG,
+    Result, BLOB_STORAGE, KV_STORAGE,
 };
 
 /// Regex pattern used to match blob references.

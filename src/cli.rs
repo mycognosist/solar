@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use structopt::StructOpt;
 
-// Generate a command line parser.
-// This defines the options that are exposed when running the solar binary.
+/// Generate a command line parser.
+/// This defines the options that are exposed when running the solar binary.
 #[derive(StructOpt, Debug)]
 #[structopt(name = "🌞 Solar", about = "Sunbathing scuttlecrabs in kuskaland", version=env!("SOLAR_VERSION"))]
 pub struct Cli {

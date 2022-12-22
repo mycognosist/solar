@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use sled::Config as KvConfig;
 use structopt::StructOpt;
 
-use crate::Result;
+use crate::{cli::Cli, Result};
 
 // Define the IP used for TCP connections (boxstream and MUXRPC).
 const MUXRPC_IP: &str = "0.0.0.0";
@@ -31,42 +31,6 @@ pub static REPLICATION_CONFIG: OnceCell<ReplicationConfig> = OnceCell::new();
 pub static RESYNC_CONFIG: OnceCell<bool> = OnceCell::new();
 // Write-once store for the public-private keypair.
 pub static SECRET_CONFIG: OnceCell<SecretConfig> = OnceCell::new();
-
-/// Generate a command line parser.
-/// This defines the options that are exposed when running the solar binary.
-#[derive(StructOpt, Debug)]
-#[structopt(name = "🌞 Solar", about = "Sunbathing scuttlecrabs in kuskaland", version=env!("SOLAR_VERSION"))]
-struct Cli {
-    /// Where data is stored (default: ~/.local/share/local)
-    #[structopt(short, long, parse(from_os_str))]
-    data: Option<PathBuf>,
-
-    /// Connect to peers (e.g. host:port:publickey, host:port:publickey)
-    #[structopt(short, long)]
-    connect: Option<String>,
-
-    // TODO: think about other ways of exposing the "connect" feature
-    /// List of peers to replicate; "connect" magic word means that peers
-    /// specified with --connect are added to the replication list
-    #[structopt(short, long)]
-    replicate: Option<String>,
-
-    /// Port to bind (default: 8008)
-    #[structopt(short, long)]
-    port: Option<u16>,
-
-    /// Run LAN discovery (default: false)
-    #[structopt(short, long)]
-    lan: Option<bool>,
-
-    /// Run the JSON-RPC server (default: true)
-    #[structopt(short, long)]
-    jsonrpc: Option<bool>,
-
-    /// Resync the local database by requesting the local feed from peers
-    #[structopt(long)]
-    resync: Option<bool>,
-}
 
 /// Application configuration for solar.
 pub struct ApplicationConfig {

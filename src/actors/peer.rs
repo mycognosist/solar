@@ -10,7 +10,6 @@ use futures::{pin_mut, select_biased, stream::StreamExt, FutureExt, SinkExt};
 use kuska_ssb::{
     api::ApiCaller,
     crypto::{ed25519, ToSsbId},
-    discovery::ssb_net_id,
     handshake::{
         async_std::{handshake_client, handshake_server, BoxStream},
         HandshakeComplete,
@@ -27,6 +26,7 @@ use crate::{
         WhoAmIHandler,
     },
     broker::*,
+    config::NETWORK_KEY,
     Result,
 };
 
@@ -60,6 +60,9 @@ pub async fn actor_inner(id: OwnedIdentity, connect: Connect) -> Result<()> {
     // Parse the public key and secret key from the identity.
     let OwnedIdentity { pk, sk, .. } = id;
 
+    // Define the network key to be used for the secret handshake.
+    let network_key = NETWORK_KEY.get().unwrap().to_owned();
+
     // Handle a TCP connection event (inbound or outbound).
     let (stream, handshake) = match connect {
         // Handle an outgoing TCP connection event.
@@ -80,7 +83,7 @@ pub async fn actor_inner(id: OwnedIdentity, connect: Connect) -> Result<()> {
             // Attempt a TCP connection.
             let mut stream = TcpStream::connect(server_port).await?;
             // Attempt a secret handshake.
-            let handshake = handshake_client(&mut stream, ssb_net_id(), pk, sk, peer_pk).await?;
+            let handshake = handshake_client(&mut stream, network_key, pk, sk, peer_pk).await?;
 
             info!("💃 connected to peer {}", handshake.peer_pk.to_ssb_id());
 
@@ -89,7 +92,7 @@ pub async fn actor_inner(id: OwnedIdentity, connect: Connect) -> Result<()> {
         // Handle an incoming TCP connection event.
         Connect::ClientStream { mut stream } => {
             // Attempt a secret handshake.
-            let handshake = handshake_server(&mut stream, ssb_net_id(), pk, sk).await?;
+            let handshake = handshake_server(&mut stream, network_key, pk, sk).await?;
             // Check if we are already connected to the selected peer.
             // If yes, return immediately.
             // If no, return the stream and handshake.

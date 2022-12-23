@@ -14,34 +14,6 @@ message publishing and replication. Indexing of database messages will be
 offloaded to client applications (ie. piping feeds from solar into a SQLite
 database).
 
-## CLI
-
-Solar can be configured and launched using the CLI interface.
-
-`solar --help`
-
-```shell
-🌞 Solar 0.3.1-6266b38
-Sunbathing scuttlecrabs in kuskaland
-
-USAGE:
-    solar [OPTIONS]
-
-    FLAGS:
-        -h, --help       Prints help information
-        -V, --version    Prints version information
-
-    OPTIONS:
-        -c, --connect <connect>        Connect to peers (e.g. host:port:publickey, host:port:publickey)
-        -d, --data <data>              Where data is stored (default: ~/.local/share/local)
-        -j, --jsonrpc <jsonrpc>        Run the JSON-RPC server (default: true)
-        -l, --lan <lan>                Run LAN discovery (default: false)
-        -p, --port <port>              Port to bind (default: 8008)
-        -r, --replicate <replicate>    List of peers to replicate; "connect" magic word means that peers specified with
-                                       --connect are added to the replication list
-            --resync <resync>          Resync the local database by requesting the local feed from peers
-```
-
 ## Quick Start
 
 Clone the source and build the binary (see [RPi build instructions](https://mycelial.technology/computers/rust-compilation.html) if required):
@@ -69,6 +41,50 @@ Run solar with LAN discovery enabled:
 _Note: a new public-private keypair will be generated and saved to
 `~/.local/share/solar/secret.toml` (or in the equivalent directory on your
 operating system)._
+
+## CLI
+
+Solar can be configured and launched using the CLI interface.
+
+`solar --help`
+
+```shell
+🌞 Solar 0.3.1-1dad14c
+Sunbathing scuttlecrabs in kuskaland
+
+USAGE:
+    solar [OPTIONS]
+
+    FLAGS:
+        -h, --help       Prints help information
+        -V, --version    Prints version information
+
+    OPTIONS:
+        -c, --connect <connect>        Connect to peers (e.g. host:port:publickey, host:port:publickey)
+        -d, --data <data>              Where data is stored (default: ~/.local/share/local)
+        -j, --jsonrpc <jsonrpc>        Run the JSON-RPC server (default: true)
+        -l, --lan <lan>                Run LAN discovery (default: false)
+        -p, --port <port>              Port to bind (default: 8008)
+        -r, --replicate <replicate>    List of peers to replicate; "connect" magic word means that peers specified with
+                                       --connect are added to the replication list
+            --resync <resync>          Resync the local database by requesting the local feed from peers
+```
+
+## Environment Variables
+
+Additional configuration parameters can be supplied via environment variables.
+
+```
+RUST_LOG
+SLED_CACHE_CAPACITY
+SOLAR_JSONRPC_IP
+SOLAR_JSONRPC_PORT
+SOLAR_NETWORK_KEY
+```
+
+For example, run `solar` with a log-level of `debug` and an alternative network key:
+
+`RUST_LOG=solar=debug SOLAR_NETWORK_KEY=3c42fff79381c451fcafd73cec3c9f897bb2232949dcdd35936d64d67c47a374 solar`
 
 ## Core Features
 

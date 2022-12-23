@@ -4,8 +4,10 @@ use async_std::{
     fs::File,
     io::{ReadExt, WriteExt},
 };
+use kuska_sodiumoxide::crypto::auth::Key as NetworkKey;
 use kuska_ssb::{
     crypto::{ed25519, ToSodiumObject, ToSsbId},
+    discovery,
     keystore::OwnedIdentity,
 };
 use log::{debug, info};
@@ -16,15 +18,17 @@ use structopt::StructOpt;
 
 use crate::{cli::Cli, Result};
 
-// Define the IP used for TCP connections (boxstream and MUXRPC).
+// Define the default IP used for TCP connections (boxstream and MUXRPC).
 const MUXRPC_IP: &str = "0.0.0.0";
-// Define the port used for TCP connections (boxstream and MUXRPC).
+// Define the default port used for TCP connections (boxstream and MUXRPC).
 const MUXRPC_PORT: u16 = 8008;
-// Define the IP used for the JSON-RPC server.
+// Define the default IP used for the JSON-RPC server.
 const JSONRPC_IP: &str = "127.0.0.1";
-// Define the port used for the JSON-RPC server.
+// Define the default port used for the JSON-RPC server.
 const JSONRPC_PORT: u16 = 3030;
 
+// Write once store for the network key (aka. SHS key or caps key).
+pub static NETWORK_KEY: OnceCell<NetworkKey> = OnceCell::new();
 // Write once store for the list of Scuttlebutt peers to replicate.
 pub static REPLICATION_CONFIG: OnceCell<ReplicationConfig> = OnceCell::new();
 // Write once store for the database resync configuration.
@@ -47,29 +51,32 @@ pub struct ApplicationConfig {
     /// Path to the feed store.
     pub feeds_folder: PathBuf,
 
-    /// Run the JSON-RPC server (default: true)
+    /// Run the JSON-RPC server (default: true).
     pub jsonrpc: bool,
 
-    /// JSON-RPC IP and port to bind (default: 127.0.0.1:3030)
+    /// JSON-RPC IP and port to bind (default: 127.0.0.1:3030).
     pub jsonrpc_addr: String,
 
     /// Sled key-value cache capacity.
     pub kv_cache_capacity: u64,
 
-    /// Run LAN discovery (default: false)
+    /// Run LAN discovery (default: false).
     pub lan_discov: bool,
 
-    /// MUXRPC IP and port to bind (default: 0.0.0.0:8008)
+    /// MUXRPC IP and port to bind (default: 0.0.0.0:8008).
     pub muxrpc_addr: String,
 
-    /// MUXRPC port to bind (default: 8008)
+    /// MUXRPC port to bind (default: 8008).
     pub muxrpc_port: u16,
 
+    /// Secret handshake HMAC key (aka. network key, caps key, SHS key).
+    pub network_key: NetworkKey,
+
     /// List of peers to replicate; "connect" magic word means that peers
-    /// specified with --connect are added to the replication list
+    /// specified with --connect are added to the replication list.
     pub replicate: Option<String>,
 
-    /// Resync the local database by requesting the local feed from peers
+    /// Resync the local database by requesting the local feed from peers.
     pub resync: bool,
 }
 
@@ -88,10 +95,14 @@ impl ApplicationConfig {
         let jsonrpc = cli_args.jsonrpc.unwrap_or(true);
         let resync = cli_args.resync.unwrap_or(false);
 
+        // Set the JSON-RPC server IP address.
+        // First check for an env var before falling back to the default.
         let jsonrpc_ip = match env::var("SOLAR_JSONRPC_IP") {
             Ok(ip) => ip,
             Err(_) => JSONRPC_IP.to_string(),
         };
+        // Set the JSON-RPC server port number.
+        // First check for an env var before falling back to the default.
         let jsonrpc_port = match env::var("SOLAR_JSONRPC_PORT") {
             Ok(port) => port,
             Err(_) => JSONRPC_PORT.to_string(),
@@ -103,6 +114,15 @@ impl ApplicationConfig {
         let kv_cache_capacity: u64 = match env::var("SLED_CACHE_CAPACITY") {
             Ok(val) => val.parse().unwrap_or(1000 * 1000 * 1000),
             Err(_) => 1000 * 1000 * 1000,
+        };
+
+        // Define the default HMAC-SHA-512-256 key for secret handshakes.
+        // This is also sometimes known as the SHS key, caps key or network key.
+        let network_key = match env::var("SOLAR_NETWORK_KEY") {
+            Ok(key) => NetworkKey::from_slice(&hex::decode(key)
+                .expect("shs key supplied via SOLAR_NETWORK_KEY env var is not valid hex"))
+                .expect("failed to instantiate an authentication key from the supplied shs key; check byte length"),
+            Err(_) => discovery::ssb_net_id(),
         };
 
         // Create the root data directory for solar.
@@ -125,6 +145,7 @@ impl ApplicationConfig {
             lan_discov,
             muxrpc_port,
             muxrpc_addr,
+            network_key,
             replicate: cli_args.replicate,
             resync,
         };
@@ -203,12 +224,14 @@ impl ApplicationConfig {
         let secret_config = SecretConfig::configure(secret_key_file).await?;
         let owned_identity = secret_config.owned_identity()?;
 
-        // Set the value of the secret configuration cell.
-        let _err = SECRET_CONFIG.set(secret_config);
+        // Set the value of the network key (aka. secret handshake key or caps key).
+        let _err = NETWORK_KEY.set(application_config.network_key.to_owned());
         // Set the value of the replication configuration cell.
         let _err = REPLICATION_CONFIG.set(replication_config);
         // Set the value of the resync configuration cell.
         let _err = RESYNC_CONFIG.set(application_config.resync);
+        // Set the value of the secret configuration cell.
+        let _err = SECRET_CONFIG.set(secret_config);
 
         Ok((
             application_config,

@@ -51,17 +51,23 @@ async fn main() -> Result<()> {
     // Spawn the ctrlc actor. Listens for SIGINT termination signal.
     Broker::spawn(actors::ctrlc::actor());
 
+    // Print 'starting server' announcement.
+    println!(
+        "Starting TCP server on {}:{}",
+        &app_config.muxrpc_addr,
+        base64::encode(&secret_config.pk[..]),
+    );
+
     // Spawn the TCP server. Facilitates peer connections.
     Broker::spawn(actors::tcp_server::actor(
         secret_config.clone(),
         app_config.muxrpc_addr,
     ));
 
-    // Print 'server started' announcement.
+    // Print the network key.
     println!(
-        "Server started on {}:{}",
-        app_config.muxrpc_port,
-        base64::encode(&secret_config.pk[..])
+        "Node deploy on network: {}",
+        hex::encode(app_config.network_key)
     );
 
     // Spawn the JSON-RPC server if the option has been set to true in the

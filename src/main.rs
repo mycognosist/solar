@@ -62,6 +62,7 @@ async fn main() -> Result<()> {
     Broker::spawn(actors::tcp_server::actor(
         secret_config.clone(),
         app_config.muxrpc_addr,
+        app_config.selective_replication,
     ));
 
     // Print the network key.
@@ -85,6 +86,7 @@ async fn main() -> Result<()> {
         Broker::spawn(actors::lan_discovery::actor(
             secret_config.clone(),
             app_config.muxrpc_port,
+            app_config.selective_replication,
         ));
     }
 
@@ -98,6 +100,7 @@ async fn main() -> Result<()> {
                 port,
                 peer_pk,
             },
+            app_config.selective_replication,
         ));
     }
 

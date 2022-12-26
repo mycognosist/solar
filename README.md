@@ -49,25 +49,27 @@ Solar can be configured and launched using the CLI interface.
 `solar --help`
 
 ```shell
-🌞 Solar 0.3.1-1dad14c
+🌞 Solar 0.3.2-02e3f0b
 Sunbathing scuttlecrabs in kuskaland
 
 USAGE:
     solar [OPTIONS]
 
-    FLAGS:
-        -h, --help       Prints help information
-        -V, --version    Prints version information
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
 
-    OPTIONS:
-        -c, --connect <connect>        Connect to peers (e.g. host:port:publickey, host:port:publickey)
-        -d, --data <data>              Where data is stored (default: ~/.local/share/local)
-        -j, --jsonrpc <jsonrpc>        Run the JSON-RPC server (default: true)
-        -l, --lan <lan>                Run LAN discovery (default: false)
-        -p, --port <port>              Port to bind (default: 8008)
-        -r, --replicate <replicate>    List of peers to replicate; "connect" magic word means that peers specified with
-                                       --connect are added to the replication list
-            --resync <resync>          Resync the local database by requesting the local feed from peers
+OPTIONS:
+    -c, --connect <connect>        Connect to peers (e.g. host:port:publickey, host:port:publickey)
+    -d, --data <data>              Where data is stored (default: ~/.local/share/local)
+    -j, --jsonrpc <jsonrpc>        Run the JSON-RPC server (default: true)
+    -l, --lan <lan>                Run LAN discovery (default: false)
+    -p, --port <port>              Port to bind (default: 8008)
+    -r, --replicate <replicate>    List of peers to replicate; "connect" magic word means that peers specified with
+                                   --connect are added to the replication list
+        --resync <resync>          Resync the local database by requesting the local feed from peers
+    -s, --selective <selective>    Only replicate with peers whose public keys are stored in `replication.toml`
+                                   (default: true)
 ```
 
 ## Environment Variables

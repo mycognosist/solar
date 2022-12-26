@@ -7,7 +7,11 @@ use kuska_ssb::keystore::OwnedIdentity;
 
 use crate::{broker::*, Result};
 
-pub async fn actor(server_id: OwnedIdentity, addr: impl ToSocketAddrs) -> Result<()> {
+pub async fn actor(
+    server_id: OwnedIdentity,
+    addr: impl ToSocketAddrs,
+    selective_replication: bool,
+) -> Result<()> {
     let broker = BROKER.lock().await.register("sbot-listener", false).await?;
 
     let mut ch_terminate = broker.ch_terminate.fuse();
@@ -21,7 +25,7 @@ pub async fn actor(server_id: OwnedIdentity, addr: impl ToSocketAddrs) -> Result
             stream = incoming.next().fuse() => {
                 if let Some(stream) = stream {
                     if let Ok(stream) = stream {
-                        Broker::spawn(super::peer::actor(server_id.clone(), super::peer::Connect::ClientStream{stream}));
+                        Broker::spawn(super::peer::actor(server_id.clone(), super::peer::Connect::ClientStream{stream}, selective_replication));
                     }
                 } else {
                     break;

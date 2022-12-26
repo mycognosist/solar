@@ -35,6 +35,8 @@ pub static REPLICATION_CONFIG: OnceCell<ReplicationConfig> = OnceCell::new();
 pub static RESYNC_CONFIG: OnceCell<bool> = OnceCell::new();
 // Write-once store for the public-private keypair.
 pub static SECRET_CONFIG: OnceCell<SecretConfig> = OnceCell::new();
+// Write once store for the selective replication configuration.
+//pub static SELECTIVE_REPLICATION: OnceCell<bool> = OnceCell::new();
 
 /// Application configuration for solar.
 pub struct ApplicationConfig {
@@ -78,6 +80,10 @@ pub struct ApplicationConfig {
 
     /// Resync the local database by requesting the local feed from peers.
     pub resync: bool,
+
+    /// Deny replication attempts from peers who are not defined in the
+    /// replication configuration (default: true).
+    pub selective_replication: bool,
 }
 
 impl ApplicationConfig {
@@ -94,6 +100,7 @@ impl ApplicationConfig {
         let muxrpc_addr = format!("{}:{}", MUXRPC_IP, muxrpc_port);
         let jsonrpc = cli_args.jsonrpc.unwrap_or(true);
         let resync = cli_args.resync.unwrap_or(false);
+        let selective_replication = cli_args.selective.unwrap_or(true);
 
         // Set the JSON-RPC server IP address.
         // First check for an env var before falling back to the default.
@@ -148,6 +155,7 @@ impl ApplicationConfig {
             network_key,
             replicate: cli_args.replicate,
             resync,
+            selective_replication,
         };
 
         Ok(app_config)
@@ -232,6 +240,8 @@ impl ApplicationConfig {
         let _err = RESYNC_CONFIG.set(application_config.resync);
         // Set the value of the secret configuration cell.
         let _err = SECRET_CONFIG.set(secret_config);
+        // Set the value of the unfiltered replication cell.
+        //let _err = UNFILTERED_REPLICATION.set(application_config.unfiltered_replication);
 
         Ok((
             application_config,

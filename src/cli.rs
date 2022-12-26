@@ -36,4 +36,9 @@ pub struct Cli {
     /// Resync the local database by requesting the local feed from peers
     #[structopt(long)]
     pub resync: Option<bool>,
+
+    /// Only replicate with peers whose public keys are stored in
+    /// `replication.toml` (default: true)
+    #[structopt(short, long)]
+    pub selective: Option<bool>,
 }

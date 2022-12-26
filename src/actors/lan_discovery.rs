@@ -11,7 +11,11 @@ use crate::{broker::*, Result};
 
 /// Register the LAN discovery endpoint, send and receive UDP broadcasts and
 /// spawn a peer actor for each successfully parsed broadcast message.
-pub async fn actor(server_id: OwnedIdentity, rpc_port: u16) -> Result<()> {
+pub async fn actor(
+    server_id: OwnedIdentity,
+    rpc_port: u16,
+    selective_replication: bool,
+) -> Result<()> {
     // Instantiate a new LAN broadcaster with the given public key and port.
     let broadcaster = LanBroadcast::new(&server_id.pk, rpc_port).await?;
 
@@ -41,7 +45,7 @@ pub async fn actor(server_id: OwnedIdentity, rpc_port: u16) -> Result<()> {
                 // `amt` is the number of bytes read.
                 if let Ok((amt, _)) = recv {
                     // Process the received data. Log any errors.
-                    if let Err(err) = process_broadcast(&server_id, &buf[..amt]).await {
+                    if let Err(err) = process_broadcast(&server_id, &buf[..amt], selective_replication).await {
                         warn!("failed to process broadcast: {:?}", err);
                     }
                 }
@@ -67,7 +71,11 @@ pub async fn actor(server_id: OwnedIdentity, rpc_port: u16) -> Result<()> {
 /// Process a UDP broadcast message and spawn a peer actor if the broadcast
 /// parsing is successful. This will result in a TCP connection attempt with
 /// the peer whose details are contained in the broadcast message.
-async fn process_broadcast(server_id: &OwnedIdentity, buff: &[u8]) -> Result<()> {
+async fn process_broadcast(
+    server_id: &OwnedIdentity,
+    buff: &[u8],
+    selective_replication: bool,
+) -> Result<()> {
     let msg = String::from_utf8_lossy(buff);
 
     // Attempt to parse the IP, port and public key from the received UDP
@@ -81,6 +89,7 @@ async fn process_broadcast(server_id: &OwnedIdentity, buff: &[u8]) -> Result<()>
                 port,
                 peer_pk,
             },
+            selective_replication,
         ));
     } else {
         warn!("failed to parse broadcast {}", msg);

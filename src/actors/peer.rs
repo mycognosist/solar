@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, net::Shutdown, time::Duration};
 
 use async_std::{
     io::{Read, Write},
@@ -26,7 +26,7 @@ use crate::{
         WhoAmIHandler,
     },
     broker::*,
-    config::NETWORK_KEY,
+    config::{NETWORK_KEY, REPLICATION_CONFIG},
     Result,
 };
 
@@ -46,8 +46,8 @@ pub enum Connect {
 pub static CONNECTED_PEERS: Lazy<Arc<RwLock<HashSet<ed25519::PublicKey>>>> =
     Lazy::new(|| Arc::new(RwLock::new(HashSet::new())));
 
-pub async fn actor(id: OwnedIdentity, connect: Connect) -> Result<()> {
-    if let Err(err) = actor_inner(id, connect).await {
+pub async fn actor(id: OwnedIdentity, connect: Connect, selective_replication: bool) -> Result<()> {
+    if let Err(err) = actor_inner(id, connect, selective_replication).await {
         warn!("peer failed: {:?}", err);
     }
     Ok(())
@@ -56,7 +56,11 @@ pub async fn actor(id: OwnedIdentity, connect: Connect) -> Result<()> {
 /// Handle a TCP connection, update the list of connected peers, register the
 /// peer actor endpoint, spawn the peer loop and report on the connection
 /// outcome.
-pub async fn actor_inner(id: OwnedIdentity, connect: Connect) -> Result<()> {
+pub async fn actor_inner(
+    id: OwnedIdentity,
+    connect: Connect,
+    selective_replication: bool,
+) -> Result<()> {
     // Parse the public key and secret key from the identity.
     let OwnedIdentity { pk, sk, .. } = id;
 
@@ -93,17 +97,43 @@ pub async fn actor_inner(id: OwnedIdentity, connect: Connect) -> Result<()> {
         Connect::ClientStream { mut stream } => {
             // Attempt a secret handshake.
             let handshake = handshake_server(&mut stream, network_key, pk, sk).await?;
+
+            // Convert the public key to a `String`.
+            let ssb_id = handshake.peer_pk.to_ssb_id();
+
+            // Add the sigil link ('@') if it's missing.
+            let peer_pk = if ssb_id.starts_with('@') {
+                ssb_id
+            } else {
+                format!("@{}", ssb_id)
+            };
+
             // Check if we are already connected to the selected peer.
             // If yes, return immediately.
             // If no, return the stream and handshake.
             if CONNECTED_PEERS.read().await.contains(&handshake.peer_pk) {
+                info!("peer {} is already connected", &peer_pk);
+
                 return Ok(());
             }
 
-            info!(
-                "💃 received connection from peer {}",
-                handshake.peer_pk.to_ssb_id()
-            );
+            info!("💃 received connection from peer {}", &peer_pk);
+
+            // Shutdown the connection if the peer is not in the list of peers
+            // to be replicated, unless replication is set to nonselective.
+            // This ensures we do not replicate with unknown peers.
+            if selective_replication & !REPLICATION_CONFIG.get().unwrap().peers.contains(&peer_pk) {
+                info!(
+                    "peer {} is not in replication list and selective replication is enabled; dropping connection",
+                    peer_pk
+                );
+
+                // This may not be necessary; the connection should close when
+                // the stream is dropped.
+                stream.shutdown(Shutdown::Both)?;
+
+                return Ok(());
+            }
 
             (stream, handshake)
         }

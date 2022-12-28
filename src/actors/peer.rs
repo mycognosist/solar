@@ -33,7 +33,7 @@ use crate::{
 pub enum Connect {
     TcpServer {
         server: String,
-        port: u32,
+        port: u16,
         peer_pk: ed25519::PublicKey,
     },
     ClientStream {

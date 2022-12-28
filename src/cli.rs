@@ -11,7 +11,10 @@ pub struct Cli {
     #[structopt(short, long, parse(from_os_str))]
     pub data: Option<PathBuf>,
 
-    /// Connect to peers (e.g. host:port:publickey, host:port:publickey)
+    /// Connect to a remote peer by specifying a URL
+    /// (e.g. tcp://<host>:<port>?shs=<public key>).
+    /// Pass a comma-separated list of URLs to connect to multiple peers
+    /// (no spaces)
     #[structopt(short, long)]
     pub connect: Option<String>,
 
@@ -24,6 +27,10 @@ pub struct Cli {
     /// Port to bind (default: 8008)
     #[structopt(short, long)]
     pub port: Option<u16>,
+
+    /// IP to bind (default: 0.0.0.0)
+    #[structopt(short, long)]
+    pub ip: Option<String>,
 
     /// Run LAN discovery (default: false)
     #[structopt(short, long)]

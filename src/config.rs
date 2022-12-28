@@ -15,6 +15,7 @@ use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use sled::Config as KvConfig;
 use structopt::StructOpt;
+use url::Url;
 
 use crate::{cli::Cli, Result};
 
@@ -46,8 +47,9 @@ pub struct ApplicationConfig {
     /// Path to the blobstore.
     pub blobs_folder: PathBuf,
 
-    /// Peers to connect to over TCP. Data for each peer connection includes a
-    /// server address, port and peer public key.
+    /// Peer(s) to connect to over TCP.
+    /// Data includes a URL for each peer connection. Multiple URLs may appear
+    /// as a comma-separated list (no spaces).
     pub connect: Option<String>,
 
     /// Path to the feed store.
@@ -65,8 +67,11 @@ pub struct ApplicationConfig {
     /// Run LAN discovery (default: false).
     pub lan_discov: bool,
 
-    /// MUXRPC IP and port to bind (default: 0.0.0.0:8008).
+    /// MUXRPC address (default: 0.0.0.0:8008).
     pub muxrpc_addr: String,
+
+    /// MUXRPC IP to bind (default: 0.0.0.0).
+    pub muxrpc_ip: String,
 
     /// MUXRPC port to bind (default: 8008).
     pub muxrpc_port: u16,
@@ -96,8 +101,9 @@ impl ApplicationConfig {
         // Retrieve application configuration parameters from the parsed CLI input.
         // Set defaults if options have not been provided.
         let lan_discov = cli_args.lan.unwrap_or(false);
+        let muxrpc_ip = cli_args.ip.unwrap_or_else(|| MUXRPC_IP.to_string());
         let muxrpc_port = cli_args.port.unwrap_or(MUXRPC_PORT);
-        let muxrpc_addr = format!("{}:{}", MUXRPC_IP, muxrpc_port);
+        let muxrpc_addr = format!("{}:{}", muxrpc_ip, muxrpc_port);
         let jsonrpc = cli_args.jsonrpc.unwrap_or(true);
         let resync = cli_args.resync.unwrap_or(false);
         let selective_replication = cli_args.selective.unwrap_or(true);
@@ -150,6 +156,7 @@ impl ApplicationConfig {
             jsonrpc_addr,
             kv_cache_capacity,
             lan_discov,
+            muxrpc_ip,
             muxrpc_port,
             muxrpc_addr,
             network_key,
@@ -166,7 +173,7 @@ impl ApplicationConfig {
     pub async fn configure() -> Result<(
         ApplicationConfig,
         KvConfig,
-        Vec<(String, u32, ed25519::PublicKey)>,
+        Vec<(String, u16, ed25519::PublicKey)>,
         OwnedIdentity,
     )> {
         let mut application_config = ApplicationConfig::from_cli()?;
@@ -196,25 +203,37 @@ impl ApplicationConfig {
             .path(&application_config.feeds_folder)
             .cache_capacity(application_config.kv_cache_capacity);
 
+        // Server, host and public key details for peers to whom a connection
+        // will be attempt.
         let mut peer_connections = Vec::new();
+
         // Parse peer connection details from the provided CLI options.
-        // Each instance of `host:port:publickey` is separated from the others
-        // and divided into its constituent parts. The tuple of the parts is
-        // then pushed to the `connections` vector.
+        // Each URL is separated from the others and divided into its
+        // constituent parts. A tuple of the parts is then pushed to the
+        // `peer_connections` vector.
         if let Some(connect) = &application_config.connect {
-            for peer in connect.split(',') {
-                let invalid_peer_msg = || format!("invalid peer {}", peer);
-                let parts = peer.split(':').collect::<Vec<&str>>();
-                if parts.len() != 3 {
-                    panic!("{}", invalid_peer_msg());
-                }
-                let server = parts[0].to_string();
-                let port = parts[1]
-                    .parse::<u32>()
-                    .unwrap_or_else(|_| panic!("{}", invalid_peer_msg()));
-                let peer_pk = parts[2]
-                    .to_ed25519_pk_no_suffix()
-                    .unwrap_or_else(|_| panic!("{}", invalid_peer_msg()));
+            for peer_url in connect.split(',') {
+                let parsed_url = Url::parse(peer_url)?;
+                // Retrieve the host from the URL.
+                let server = parsed_url
+                    .host()
+                    .expect("peer connection url is missing host")
+                    .to_string();
+                // Retrieve the port from the URL.
+                let port = parsed_url
+                    .port()
+                    .expect("peer connection url is missing port");
+                // Retrieve the public key from the URL.
+                let query_param = parsed_url
+                    .query()
+                    .expect("peer connection url is missing public key query parameter");
+                // Split the public key from `shs=` (appears at the beginning of
+                // the query parameter).
+                let (_, public_key) = query_param.split_at(4);
+                // Format the public key as an `ed25519` hash.
+                let peer_pk = public_key.to_ed25519_pk_no_suffix()?;
+
+                // Push the peer connection details to the vector.
                 peer_connections.push((server, port, peer_pk));
             }
         }
@@ -295,7 +314,7 @@ impl ReplicationConfig {
     /// attempted. Write the public keys of the replication peers to file
     /// if they are not already stored there.
     async fn parse_and_update_configuration(
-        peer_connections: &Vec<(String, u32, ed25519::PublicKey)>,
+        peer_connections: &Vec<(String, u16, ed25519::PublicKey)>,
         replication_list: &Option<String>,
         replication_config_file: PathBuf,
     ) -> Result<Self> {

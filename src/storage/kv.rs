@@ -307,7 +307,7 @@ mod test {
     use serde_json::json;
     use sled::Config as KvConfig;
 
-    use crate::SecretConfig;
+    use crate::config::SecretConfig;
 
     fn open_temporary_kv() -> KvStorage {
         let mut kv = KvStorage::default();

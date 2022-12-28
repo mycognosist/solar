@@ -35,6 +35,8 @@ pub enum Error {
     SerializeToml(ser::Error),
     /// SSB API error.
     SsbApi(api::Error),
+    /// URL parsing error.
+    UrlParse(url::ParseError),
     /// SSB message validation error.
     Validation(feed::Error),
     /// Unknown error.
@@ -64,6 +66,7 @@ impl fmt::Display for Error {
             Error::SerdeJson(err) => write!(f, "serde json error: {}", err),
             Error::SerializeToml(err) => write!(f, "failed to serialize toml: {}", err),
             Error::SsbApi(err) => write!(f, "ssb api error: {}", err),
+            Error::UrlParse(err) => write!(f, "failed to parse url: {}", err),
             Error::Validation(err) => write!(f, "message validation error: {}", err),
             Error::Other(err) => write!(f, "uncategorized error: {}", err),
         }
@@ -148,6 +151,12 @@ impl From<api::Error> for Error {
     }
 }
 
+impl From<url::ParseError> for Error {
+    fn from(err: url::ParseError) -> Error {
+        Error::UrlParse(err)
+    }
+}
+
 impl From<feed::Error> for Error {
     fn from(err: feed::Error) -> Error {
         Error::Validation(err)
@@ -160,12 +169,17 @@ impl From<feed::Error> for Error {
 impl From<Error> for jsonrpc_core::Error {
     fn from(err: Error) -> Self {
         match &err {
-            Error::Validation(err_msg) => jsonrpc_core::Error {
+            Error::SerdeJson(err_msg) => jsonrpc_core::Error {
+                code: jsonrpc_core::ErrorCode::ServerError(-32000),
+                message: err_msg.to_string(),
+                data: None,
+            },
+            Error::UrlParse(err_msg) => jsonrpc_core::Error {
                 code: jsonrpc_core::ErrorCode::ServerError(-32001),
                 message: err_msg.to_string(),
                 data: None,
             },
-            Error::SerdeJson(err_msg) => jsonrpc_core::Error {
+            Error::Validation(err_msg) => jsonrpc_core::Error {
                 code: jsonrpc_core::ErrorCode::ServerError(-32002),
                 message: err_msg.to_string(),
                 data: None,

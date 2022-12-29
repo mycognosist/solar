@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf};
+use std::{collections::HashMap, env, path::PathBuf};
 
 use async_std::{
     fs::File,
@@ -6,7 +6,7 @@ use async_std::{
 };
 use kuska_sodiumoxide::crypto::auth::Key as NetworkKey;
 use kuska_ssb::{
-    crypto::{ed25519, ToSodiumObject, ToSsbId},
+    crypto::{ed25519::PublicKey, ToSodiumObject, ToSsbId},
     discovery,
     keystore::OwnedIdentity,
 };
@@ -173,7 +173,7 @@ impl ApplicationConfig {
     pub async fn configure() -> Result<(
         ApplicationConfig,
         KvConfig,
-        Vec<(String, u16, ed25519::PublicKey)>,
+        Vec<(Url, String, u16, PublicKey)>,
         OwnedIdentity,
     )> {
         let mut application_config = ApplicationConfig::from_cli()?;
@@ -234,7 +234,7 @@ impl ApplicationConfig {
                 let peer_pk = public_key.to_ed25519_pk_no_suffix()?;
 
                 // Push the peer connection details to the vector.
-                peer_connections.push((server, port, peer_pk));
+                peer_connections.push((parsed_url, server, port, peer_pk));
             }
         }
 
@@ -271,11 +271,12 @@ impl ApplicationConfig {
     }
 }
 
-/// List of peers whose data will be replicated.
+/// List of peers to be replicated.
 #[derive(Default, Serialize, Deserialize)]
 pub struct ReplicationConfig {
-    /// Public keys.
-    pub peers: Vec<String>,
+    /// Peer data. Each entry includes a public key (key) and URL (value).
+    /// The URL contains the host, port and public key of the peer's node.
+    pub peers: HashMap<String, String>,
 }
 
 impl ReplicationConfig {
@@ -290,7 +291,8 @@ impl ReplicationConfig {
     }
 
     /// If the replication config file is not found, generate a new one and
-    /// write it to file.
+    /// write it to file. Otherwise, read the list of peer replication data
+    /// from the file and return it.
     pub async fn configure(replication_config_file: &PathBuf) -> Result<Self> {
         if !replication_config_file.is_file() {
             println!(
@@ -314,7 +316,7 @@ impl ReplicationConfig {
     /// attempted. Write the public keys of the replication peers to file
     /// if they are not already stored there.
     async fn parse_and_update_configuration(
-        peer_connections: &Vec<(String, u16, ed25519::PublicKey)>,
+        peer_connections: &Vec<(Url, String, u16, PublicKey)>,
         replication_list: &Option<String>,
         replication_config_file: PathBuf,
     ) -> Result<Self> {
@@ -323,21 +325,45 @@ impl ReplicationConfig {
         // Parse the list of public keys identifying peers whose data should be
         // replicated. Write the keys to file if they are not stored there already.
         if let Some(peers) = replication_list {
+            // Split the peer public keys if more than one has been specified.
             for peer in peers.split(',') {
+                // Add the key to the peer replication list if isn't already
+                // there. A blank `String` stands in place of the peer's URL.
+                if !replication_config.peers.contains_key(&peer.to_string()) {
+                    replication_config
+                        .peers
+                        .insert(peer.to_string(), "".to_string())
+                        .unwrap();
+                }
                 // If `connect` appears in the input, add the public key of each
                 // peer specified in the `connect` option to the list of peers to
                 // be replicated.
-                if peer == "connect" {
+                else if peer == "connect" {
                     for conn in peer_connections {
-                        let conn_id = format!("@{}", conn.2.to_ssb_id());
-                        if !replication_config.peers.contains(&conn_id) {
-                            replication_config.peers.push(conn_id);
+                        // Retrieve and format the public key of the peer from
+                        // the connection data.
+                        let conn_id = format!("@{}", conn.3.to_ssb_id());
+                        // Query the peers HashMap for the public key and URL
+                        // matching the given public key.
+                        let peer_key_value = replication_config.peers.get_key_value(&conn_id);
+                        if let Some((peer_key, peer_url)) = peer_key_value {
+                            // Avoid overwriting the URL of the peer if it already
+                            // appears in the peer replication list.
+                            if peer_url.is_empty() {
+                                replication_config
+                                    .peers
+                                    .insert(peer_key.to_string(), conn.0.to_string())
+                                    .unwrap();
+                            }
+                        } else if peer_key_value.is_none() {
+                            // Add the peer public key and URL to the peer
+                            // replication list.
+                            replication_config
+                                .peers
+                                .insert(conn_id, conn.0.to_string())
+                                .unwrap();
                         }
                     }
-                // Prevent duplicate entries by checking if the given public key
-                // is already contained in the config.
-                } else if !replication_config.peers.contains(&peer.to_string()) {
-                    replication_config.peers.push(peer.to_string())
                 }
             }
             let mut file = File::create(replication_config_file).await?;

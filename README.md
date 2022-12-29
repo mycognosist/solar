@@ -131,9 +131,9 @@ Additional configuration parameters can be supplied via environment variables.
 
 ```
 RUST_LOG
-SLED_CACHE_CAPACITY
 SOLAR_JSONRPC_IP
 SOLAR_JSONRPC_PORT
+SOLAR_KV_CACHE_CAPACITY
 SOLAR_NETWORK_KEY
 ```
 

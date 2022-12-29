@@ -92,7 +92,7 @@ async fn main() -> Result<()> {
 
     // Spawn the peer actor for each set of provided connection parameters.
     // Facilitates replication.
-    for (server, port, peer_pk) in peer_connections {
+    for (_url, server, port, peer_pk) in peer_connections {
         Broker::spawn(actors::peer::actor(
             secret_config.clone(),
             actors::peer::Connect::TcpServer {

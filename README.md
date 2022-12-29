@@ -4,7 +4,7 @@ A minimal Secure Scuttlebutt node capable of lightweight replication and feed st
 
 :warning: **Solar is alpha software; expect breaking changes** :construction:
 
-[Background](#background) | [Features](#features) | [Installation](#installation) | [Usage](#usage) | [Examples](#examples) | [Command-line options](#options) | [Configuration](#configuration) | [JSON-RPC API](#json-rpc) | [License](#license)
+[Background](#background) | [Features](#features) | [Installation](#installation) | [Usage](#usage) | [Examples](#examples) | [CLI Options](#options) | [Configuration](#configuration) | [JSON-RPC API](#json-rpc) | [License](#license)
 
 ## Background
 
@@ -75,7 +75,7 @@ Attempt a connection with a peer:
 
 `solar --help`
 
-```shell
+```
 🌞 Solar 0.3.2-1bb6bed
 Sunbathing scuttlecrabs in kuskaland
 
@@ -152,19 +152,23 @@ While running, a solar node can be queried using JSON-RPC over HTTP.
 
 ### Examples
 
-`curl` can be used to invoke the available methods from the commandline:
+`curl` can be used to invoke the available methods from the commandline.
 
-```
-curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "ping", "id":1 }' 127.0.0.1:3030
+Request:
 
-{"jsonrpc":"2.0","result":"pong!","id":1}
-```
+`curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "ping", "id":1 }' 127.0.0.1:3030`
 
-```
-curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "publish", "params": {"type": "about", "about": "@o8lWpyLeSqV/BJV9pbxFhKpwm6Lw5k+sqexYK+zT9Tc=.ed25519", "name": "solar_glyph", "description": "glyph's experimental solar (rust) node"}, "id":1 }' 127.0.0.1:3030
+Response:
 
-{"jsonrpc":"2.0","result":{"msg_ref":"%ZwYwLxMHgU8eC43HOziJvYURjZzAzwFk3v5RYS/NbQY=.sha256","seq": 3,"id":1}
-```
+`{"jsonrpc":"2.0","result":"pong!","id":1}`
+
+Request:
+
+`curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "publish", "params": {"type": "about", "about": "@o8lWpyLeSqV/BJV9pbxFhKpwm6Lw5k+sqexYK+zT9Tc=.ed25519", "name": "solar_glyph", "description": "glyph's experimental solar (rust) node"}, "id":1 }' 127.0.0.1:3030`
+
+Response:
+
+`{"jsonrpc":"2.0","result":{"msg_ref":"%ZwYwLxMHgU8eC43HOziJvYURjZzAzwFk3v5RYS/NbQY=.sha256","seq": 3,"id":1}`
 
 _Note: You might find it easier to save your JSON to file and pass that to `curl` instead._
 

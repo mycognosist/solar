@@ -26,10 +26,16 @@ cargo build --release
 
 Add peer(s) to `replication.toml` (public key(s) of feeds you wish to replicate):
 
-```
-vim ~/.local/share/solar/replication.toml
+`vim ~/.local/share/solar/replication.toml`
 
-peers = ["@...=.ed25519"]
+```toml
+[peers]
+# Peer data takes the form of key-value pairs.
+# The key is the public key of a peer.
+# The value is a URL specifying the connection address of the peer.
+# The URL takes the form: <scheme>://<host>:<port>?shs=<public key>.
+# The value must be an empty string if the URL is unknown.
+"@...=.ed25519" = ""
 ```
 
 Run solar with LAN discovery enabled:
@@ -49,7 +55,7 @@ Solar can be configured and launched using the CLI interface.
 `solar --help`
 
 ```shell
-🌞 Solar 0.3.2-02e3f0b
+🌞 Solar 0.3.2-1bb6bed
 Sunbathing scuttlecrabs in kuskaland
 
 USAGE:
@@ -62,6 +68,7 @@ FLAGS:
 OPTIONS:
     -c, --connect <connect>        Connect to peers (e.g. host:port:publickey, host:port:publickey)
     -d, --data <data>              Where data is stored (default: ~/.local/share/local)
+    -i, --ip <ip>                  IP to bind (default: 0.0.0.0)
     -j, --jsonrpc <jsonrpc>        Run the JSON-RPC server (default: true)
     -l, --lan <lan>                Run LAN discovery (default: false)
     -p, --port <port>              Port to bind (default: 8008)

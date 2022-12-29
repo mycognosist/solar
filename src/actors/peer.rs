@@ -122,7 +122,13 @@ pub async fn actor_inner(
             // Shutdown the connection if the peer is not in the list of peers
             // to be replicated, unless replication is set to nonselective.
             // This ensures we do not replicate with unknown peers.
-            if selective_replication & !REPLICATION_CONFIG.get().unwrap().peers.contains(&peer_pk) {
+            if selective_replication
+                & !REPLICATION_CONFIG
+                    .get()
+                    .unwrap()
+                    .peers
+                    .contains_key(&peer_pk)
+            {
                 info!(
                     "peer {} is not in replication list and selective replication is enabled; dropping connection",
                     peer_pk

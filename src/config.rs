@@ -36,8 +36,6 @@ pub static REPLICATION_CONFIG: OnceCell<ReplicationConfig> = OnceCell::new();
 pub static RESYNC_CONFIG: OnceCell<bool> = OnceCell::new();
 // Write-once store for the public-private keypair.
 pub static SECRET_CONFIG: OnceCell<SecretConfig> = OnceCell::new();
-// Write once store for the selective replication configuration.
-//pub static SELECTIVE_REPLICATION: OnceCell<bool> = OnceCell::new();
 
 /// Application configuration for solar.
 pub struct ApplicationConfig {
@@ -124,7 +122,7 @@ impl ApplicationConfig {
 
         // Read KV database cache capacity setting from environment variable.
         // Define default value (1 GB) if env var is unset.
-        let kv_cache_capacity: u64 = match env::var("SLED_CACHE_CAPACITY") {
+        let kv_cache_capacity: u64 = match env::var("SOLAR_KV_CACHE_CAPACITY") {
             Ok(val) => val.parse().unwrap_or(1000 * 1000 * 1000),
             Err(_) => 1000 * 1000 * 1000,
         };

@@ -1,5 +1,13 @@
 # 🌞 Solar
 
+A minimal Secure Scuttlebutt node capable of lightweight replication and feed storage.
+
+:warning: **Solar is alpha software; expect breaking changes** :construction:
+
+[Background](#background) | [Features](#features) | [Installation](#installation) | [Usage](#usage) | [Examples](#examples) | [Command-line options](#options) | [Configuration](#configuration) | [JSON-RPC API](#json-rpc) | [License](#license)
+
+## Background
+
 Solar was written by [@adria0](https://github.com/adria0) with the idea to 
 enable community hardware devices to speak [Secure Scuttlebutt](https://scuttlebutt.nz/)
 using the [Kuska](https://github.com/Kuska-ssb) Rust libraries, mainly based on 
@@ -14,9 +22,26 @@ message publishing and replication. Indexing of database messages will be
 offloaded to client applications (ie. piping feeds from solar into a SQLite
 database).
 
-## Quick Start
+## Features
 
-Clone the source and build the binary (see [RPi build instructions](https://mycelial.technology/computers/rust-compilation.html) if required):
+ - **Keypair creation:** Automatically generate a new public-private keypair
+ - **Feed generation:** Store published and replicated messages in a key-value database
+ - **LAN discovery:** Broadcast and listen for peer connection messages over UDP
+ - **Legacy replication:** Replicate with peers using MUXRPC (`createHistoryStream` etc.)
+ - **Local feed resync:** Recover lost local feed messages from peers
+ - **Interoperability:** Connect and replicate with [Patchwork](https://github.com/ssbc/patchwork)
+   and [Go-SSB](https://github.com/ssbc/go-ssb)¹
+ - **Selective replication:** Only replicate with specified peers
+ - **JSON-RPC interface:** Interact with the node using JSON-RPC over HTTP
+ - **Alternative network key:** Operate with a unique network key
+
+_¹ - this is possible because those implementations support legacy replication (using `createHistoryStream`)_
+
+## Installation
+
+Download the latest [release](https://github.com/mycognosist/solar/releases) and copy the binary to `/usr/bin` or similar directory.
+
+Alternatively, clone the source and build the binary (see [RPi build instructions](https://mycelial.technology/computers/rust-compilation.html) if required):
 
 ```
 git clone git@github.com:mycognosist/solar.git
@@ -24,33 +49,29 @@ cd solar
 cargo build --release
 ```
 
-Add peer(s) to `replication.toml` (public key(s) of feeds you wish to replicate):
+## Usage
 
-`vim ~/.local/share/solar/replication.toml`
+`solar`
 
-```toml
-[peers]
-# Peer data takes the form of key-value pairs.
-# The key is the public key of a peer.
-# The value is a URL specifying the connection address of the peer.
-# The URL takes the form: <scheme>://<host>:<port>?shs=<public key>.
-# The value must be an empty string if the URL is unknown.
-"@...=.ed25519" = ""
-```
+### Examples
 
-Run solar with LAN discovery enabled:
+Enable LAN discovery:
 
-```
-./target/release/solar --lan true
-```
+`solar --lan true`
 
-_Note: a new public-private keypair will be generated and saved to
-`~/.local/share/solar/secret.toml` (or in the equivalent directory on your
-operating system)._
+Listen for TCP connections on the IPv6 wildcard and non-default port:
 
-## CLI
+`solar --ip :: --port 8010`
 
-Solar can be configured and launched using the CLI interface.
+Enable log reporting at the `debug` level:
+
+`RUST_LOG=solar=debug solar`
+
+Attempt a connection with a peer:
+
+`solar --connect "tcp://[200:df93:fed8:e5ff:5c43:eab7:6c74:9d94]:8010?shs=MDErHCTxklXc7QZ43fnyzERbRJ7fccRfCYF11EqIFEI="`
+
+### Options
 
 `solar --help`
 
@@ -79,7 +100,32 @@ OPTIONS:
                                    (default: true)
 ```
 
-## Environment Variables
+## Configuration
+
+The public-private keypair is stored in `~/.local/share/solar/secret.toml` (or equivalent path according to the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/latest/)). 
+
+Likewise, replication configuration is stored in `~/.local/share/solar/replication.toml`. This file consists of a series of key-value pairs and defines the peers with whom the local node will attempt to replicate.
+
+Peers can be manually added to the replication configuration:
+
+`vim ~/.local/share/solar/replication.toml`
+
+```toml
+[peers]
+# Peer data takes the form of key-value pairs.
+# The key is the public key of a peer.
+# The value is a URL specifying the connection address of the peer.
+# The URL takes the form: <scheme>://<host>:<port>?shs=<public key>.
+# The value must be an empty string if the URL is unknown.
+"@o8lWpyLeSqV/BJV9pbxFhKpwm6Lw5k+sqexYK+zT9Tc=.ed25519" = "tcp://[200:9730:17c:7f5b:c7c6:c999:7b2a:c958]:8008"
+"@HEqy940T6uB+T+d9Jaa58aNfRzLx9eRWqkZljBmnkmk=.ed25519" = ""
+```
+
+Alternatively, peers can be added to the replication configuration via CLI options:
+
+`solar --connect "tcp://[200:df93:fed8:e5ff:5c43:eab7:6c74:9d94]:8010?shs=MDErHCTxklXc7QZ43fnyzERbRJ7fccRfCYF11EqIFEI=" --replicate connect`
+
+### Environment Variables
 
 Additional configuration parameters can be supplied via environment variables.
 
@@ -91,44 +137,9 @@ SOLAR_JSONRPC_PORT
 SOLAR_NETWORK_KEY
 ```
 
-For example, run `solar` with a log-level of `debug` and an alternative network key:
-
-`RUST_LOG=solar=debug SOLAR_NETWORK_KEY=3c42fff79381c451fcafd73cec3c9f897bb2232949dcdd35936d64d67c47a374 solar`
-
-## Core Features
-
-- [X] auto-create private key if not exists
-- [X] broadcast the identity via lan discovery
-- [X] automatic feed generation
-- [X] minimal [sled](https://github.com/spacejam/sled) database to store generate feeds
-- [X] mux-rpc implementation
-  - [X] `blobs createWants`
-  - [X] `blobs get`
-  - [X] `createHistoryStream`
-  - [X] `get`
-  - [X] `whoami`
-  - [X] [patchwork](https://github.com/ssbc/patchwork) and [go-ssb](https://github.com/ssbc/go-ssb) interoperability
-- [X] resync local feed from peers
-- [X] legacy replication (using `createHistoryStream`)
-
-## Extensions
-
-_Undergoing active development. Expect APIs to change._
-
-- [X] json-rpc server for user queries
-  - [X] feed
-  - [X] message
-  - [X] peers
-  - [X] ping
-  - [X] publish
-  - [X] whoami
-  - [ ] ...
-- [ ] improved connection handler
-- [ ] ebt replication
-
 ## JSON-RPC API
 
-The server currently supports HTTP.
+While running, a solar node can be queried using JSON-RPC over HTTP.
 
 | Method | Parameters | Response | Description |
 | --- | --- | --- | --- |
@@ -138,6 +149,8 @@ The server currently supports HTTP.
 | `ping` | | `pong!` | Responds if the JSON-RPC server is running |
 | `publish` | `<content>` | `{ "msg_ref": "<%...=.sha256>", "seq_num": <int> }` | Publishes a message and returns the reference (message hash) and sequence number |
 | `whoami` | | `<@...=.ed25519>` | Returns the public key of the local node |
+
+### Examples
 
 `curl` can be used to invoke the available methods from the commandline:
 

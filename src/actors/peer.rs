@@ -67,6 +67,9 @@ pub async fn actor_inner(
     // Define the network key to be used for the secret handshake.
     let network_key = NETWORK_KEY.get().unwrap().to_owned();
 
+    // TODO: pass message to the broker for the connection manager:
+    // ConnectionEvent::Connecting
+
     // Handle a TCP connection event (inbound or outbound).
     let (stream, handshake) = match connect {
         // Handle an outgoing TCP connection event.
@@ -86,6 +89,13 @@ pub async fn actor_inner(
             let server_port = format!("{}:{}", server, port);
             // Attempt a TCP connection.
             let mut stream = TcpStream::connect(server_port).await?;
+
+            // TODO: pass message to the broker for the connection manager:
+            // ConnectionEvent::Connected
+
+            // TODO: pass message to the broker for the connection manager:
+            // ConnectionEvent::Handshaking
+
             // Attempt a secret handshake.
             let handshake = handshake_client(&mut stream, network_key, pk, sk, peer_pk).await?;
 
@@ -95,6 +105,9 @@ pub async fn actor_inner(
         }
         // Handle an incoming TCP connection event.
         Connect::ClientStream { mut stream } => {
+            // TODO: pass message to the broker for the connection manager:
+            // ConnectionEvent::Handshaking
+
             // Attempt a secret handshake.
             let handshake = handshake_server(&mut stream, network_key, pk, sk).await?;
 
@@ -157,6 +170,9 @@ pub async fn actor_inner(
     // Parse the peer public key from the handshake.
     let peer_pk = handshake.peer_pk;
 
+    // TODO:
+    // Remember to change the placement of this.
+
     // Add the peer to the list of connected peers.
     CONNECTED_PEERS.write().await.insert(peer_pk);
 
@@ -176,8 +192,14 @@ pub async fn actor_inner(
 
     if let Err(err) = res {
         warn!("💀 client terminated with error {:?}", err);
+
+        // TODO: pass message to the connection manager via the broker
+        // ConnectionEvent::Error(err)
+        // HINT: Use the `ConnectionError` as the type for `err`.
     } else {
         info!("👋 finished connection with {}", &peer_pk.to_ssb_id());
+        // TODO: pass message to the connection manager via the broker
+        // ConnectionEvent::Disconnected
     }
 
     let _ = ch_broker.send(BrokerEvent::Disconnect { actor_id }).await;
@@ -230,6 +252,10 @@ async fn peer_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
     // Convert the box stream reader into a stream.
     let rpc_recv_stream = rpc_reader.into_stream().fuse();
     pin_mut!(rpc_recv_stream);
+
+    // TODO: pass message to the connection manager via the broker
+    // ConnectionEvent::Replicating
+    // Use `ch_broker`
 
     loop {
         // Poll multiple futures and streams simultaneously, executing the

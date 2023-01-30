@@ -145,7 +145,7 @@ where
                 // Instantiate the history stream request args for the given peer.
                 // The `live` arg means: keep the connection open after initial
                 // replication.
-                let mut args = dto::CreateHistoryStreamIn::new(peer_pk.to_string()).live(true);
+                let mut args = dto::CreateHistoryStreamIn::new(peer_pk.to_string()).live(false);
 
                 // Retrieve the sequence number of the most recent message for
                 // this peer from the local key-value store.

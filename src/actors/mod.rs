@@ -1,3 +1,4 @@
+pub mod connection_manager;
 pub mod ctrlc;
 pub mod jsonrpc_server;
 pub mod lan_discovery;

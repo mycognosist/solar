@@ -10,6 +10,7 @@ mod config;
 mod error;
 mod storage;
 
+use actors::connection_manager::CONNECTION_MANAGER;
 use broker::*;
 use config::ApplicationConfig;
 use storage::{blob::BlobStorage, kv::KvStorage};
@@ -104,9 +105,13 @@ async fn main() -> Result<()> {
         ));
     }
 
+    // Spawn the connection manager message loop.
+    let connection_manager_msgloop = CONNECTION_MANAGER.lock().await.take_msgloop();
+    connection_manager_msgloop.await;
+
     // Spawn the broker message loop.
-    let msgloop = BROKER.lock().await.take_msgloop();
-    msgloop.await;
+    let broker_msgloop = BROKER.lock().await.take_msgloop();
+    broker_msgloop.await;
 
     println!("Gracefully finished");
 

@@ -286,7 +286,7 @@ impl KvStorage {
         // Lookup the latest sequence number for the given peer.
         if let Some(latest_seq) = self.get_latest_seq(user_id)? {
             // Iterate through the messages in the feed.
-            for msg_seq in 1..latest_seq {
+            for msg_seq in 1..=latest_seq {
                 // Get the message KVT for the given author and message
                 // sequence number and add it to the feed vector.
                 // TODO: consider handling the `None` case instead of

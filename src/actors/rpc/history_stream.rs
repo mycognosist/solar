@@ -8,7 +8,7 @@ use kuska_ssb::{
     feed::{Feed as MessageKvt, Message},
     rpc,
 };
-use log::{debug, info, warn};
+use log::{debug, info, trace, warn};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -69,15 +69,16 @@ where
                     _ => Ok(false),
                 }
             }
-            // Handle an outgoing MUXRPC response.
+            // Handle an incoming MUXRPC response.
             RpcInput::Network(req_no, rpc::RecvMsg::RpcResponse(_type, res)) => {
                 self.recv_rpc_response(api, ch_broker, *req_no, res).await
             }
-            // Handle an outgoing MUXRPC 'cancel stream' response.
+            // Handle an incoming MUXRPC 'cancel stream' response.
             RpcInput::Network(req_no, rpc::RecvMsg::CancelStreamRespose()) => {
+                trace!(target: "history-stream-handler", "matched cancel stream response with req no: {}", req_no);
                 self.recv_cancelstream(api, *req_no).await
             }
-            // Handle an outgoing MUXRPC error response.
+            // Handle an incoming MUXRPC error response.
             RpcInput::Network(req_no, rpc::RecvMsg::ErrorResponse(err)) => {
                 self.recv_error_response(api, *req_no, err).await
             }
@@ -293,11 +294,20 @@ where
     /// Close the stream and remove the public key of the peer from the list
     /// of active streams (`reqs`).
     async fn recv_cancelstream(&mut self, api: &mut ApiCaller<W>, req_no: i32) -> Result<bool> {
+        trace!(target: "history-stream-handler", "recv_cancelstream called for req no: {}", req_no);
         if let Some(key) = self.find_key_by_req_no(req_no) {
+            trace!(target: "history-stream-handler", "key found for req no: {}", req_no);
+
+            trace!(target: "history-stream-handler", "sending eof rpc message to peer for req no: {}", req_no);
             api.rpc().send_stream_eof(-req_no).await?;
+
+            trace!(target: "history-stream-handler", "removing {} from list of active peers", key);
             self.reqs.remove(&key);
+
+            trace!(target: "history-stream-handler", "cancel stream event has been handled; returning true");
             Ok(true)
         } else {
+            trace!(target: "history-stream-handler", "no key found for req no: {}", req_no);
             Ok(false)
         }
     }

@@ -311,6 +311,8 @@ async fn peer_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
     // Parse the peer public key from the handshake.
     let peer_ssb_id = handshake.peer_pk.to_ssb_id();
 
+    trace!(target: "peer-loop", "initiating peer loop with: {}", peer_ssb_id);
+
     // Instantiate a box stream and split it into reader and writer streams.
     let (box_stream_read, box_stream_write) =
         BoxStream::from_handshake(reader, writer, handshake, 0x8000).split_read_write();
@@ -347,6 +349,8 @@ async fn peer_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
     pin_mut!(rpc_recv_stream);
 
     loop {
+        trace!(target: "peer-loop", "peer loop initiated with: {}", peer_ssb_id);
+
         // Poll multiple futures and streams simultaneously, executing the
         // branch for the future that finishes first. If multiple futures are
         // ready, one will be selected in order of declaration.
@@ -370,6 +374,8 @@ async fn peer_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
             },
         };
 
+        trace!(target: "peer-loop", "peer loop input: {:?}", input);
+
         let mut handled = false;
         for handler in handlers.iter_mut() {
             match handler.handle(&mut api, &input, &mut ch_broker).await {
@@ -385,7 +391,7 @@ async fn peer_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
             }
         }
         if !handled {
-            trace!("message not processed: {:?}", input);
+            trace!(target: "peer-loop", "message not processed: {:?}", input);
         }
     }
 

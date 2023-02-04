@@ -414,9 +414,7 @@ impl SecretConfig {
     /// to file. This includes the creation of a unique public-private keypair.
     pub async fn configure(secret_key_file: PathBuf) -> Result<Self> {
         if !secret_key_file.is_file() {
-            println!(
-                "Private key not found, generated new one in {secret_key_file:?}"
-            );
+            println!("Private key not found, generated new one in {secret_key_file:?}");
             let config = SecretConfig::create();
             let mut file = File::create(&secret_key_file).await?;
             file.write_all(&config.to_toml()?).await?;

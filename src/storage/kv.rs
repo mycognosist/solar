@@ -138,7 +138,7 @@ impl KvStorage {
     pub fn get_latest_seq(&self, user_id: &str) -> Result<Option<u64>> {
         let db = self.db.as_ref().unwrap();
         let key = Self::key_latest_seq(user_id);
-        let seq = if let Some(value) = db.get(&key)? {
+        let seq = if let Some(value) = db.get(key)? {
             let mut u64_buffer = [0u8; 8];
             u64_buffer.copy_from_slice(&value);
             Some(u64::from_be_bytes(u64_buffer))
@@ -313,7 +313,7 @@ mod test {
         let mut kv = KvStorage::default();
         let (sender, _) = futures::channel::mpsc::unbounded();
         let path = tempdir::TempDir::new("solardb").unwrap();
-        let config = KvConfig::new().path(&path.path());
+        let config = KvConfig::new().path(path.path());
         kv.open(config, sender).unwrap();
         kv
     }
@@ -331,7 +331,7 @@ mod test {
         for i in 1..=4 {
             // Create a post-type message.
             let msg_content = TypedMessage::Post {
-                text: format!("Important announcement #{}", i),
+                text: format!("Important announcement #{i}"),
                 mentions: None,
             };
 
@@ -529,7 +529,7 @@ mod test {
 
         let blob = kv.get_blob("b1")?.unwrap();
 
-        assert_eq!(blob.retrieved, false);
+        assert!(!blob.retrieved);
         assert_eq!(blob.users, ["u7".to_string()].to_vec());
         assert_eq!(
             kv.get_pending_blobs().unwrap(),

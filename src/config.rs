@@ -101,7 +101,7 @@ impl ApplicationConfig {
         let lan_discov = cli_args.lan.unwrap_or(false);
         let muxrpc_ip = cli_args.ip.unwrap_or_else(|| MUXRPC_IP.to_string());
         let muxrpc_port = cli_args.port.unwrap_or(MUXRPC_PORT);
-        let muxrpc_addr = format!("{}:{}", muxrpc_ip, muxrpc_port);
+        let muxrpc_addr = format!("{muxrpc_ip}:{muxrpc_port}");
         let jsonrpc = cli_args.jsonrpc.unwrap_or(true);
         let resync = cli_args.resync.unwrap_or(false);
         let selective_replication = cli_args.selective.unwrap_or(true);
@@ -118,7 +118,7 @@ impl ApplicationConfig {
             Ok(port) => port,
             Err(_) => JSONRPC_PORT.to_string(),
         };
-        let jsonrpc_addr = format!("{}:{}", jsonrpc_ip, jsonrpc_port);
+        let jsonrpc_addr = format!("{jsonrpc_ip}:{jsonrpc_port}");
 
         // Read KV database cache capacity setting from environment variable.
         // Define default value (1 GB) if env var is unset.
@@ -294,8 +294,7 @@ impl ReplicationConfig {
     pub async fn configure(replication_config_file: &PathBuf) -> Result<Self> {
         if !replication_config_file.is_file() {
             println!(
-                "Replication configuration file not found, generated new one in {:?}",
-                replication_config_file
+                "Replication configuration file not found, generated new one in {replication_config_file:?}"
             );
             let config = ReplicationConfig::default();
             let mut file = File::create(&replication_config_file).await?;
@@ -415,10 +414,7 @@ impl SecretConfig {
     /// to file. This includes the creation of a unique public-private keypair.
     pub async fn configure(secret_key_file: PathBuf) -> Result<Self> {
         if !secret_key_file.is_file() {
-            println!(
-                "Private key not found, generated new one in {:?}",
-                secret_key_file
-            );
+            println!("Private key not found, generated new one in {secret_key_file:?}");
             let config = SecretConfig::create();
             let mut file = File::create(&secret_key_file).await?;
             file.write_all(&config.to_toml()?).await?;

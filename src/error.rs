@@ -48,27 +48,27 @@ impl std::error::Error for Error {}
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::AddrParse(err) => write!(f, "failed to parse ip address: {}", err),
-            Error::BaseDirectories(err) => write!(f, "base directory error: {}", err),
-            Error::Crypto(err) => write!(f, "ssb cryptographic error: {}", err),
-            Error::Database(err) => write!(f, "key-value database error: {}", err),
-            Error::DeserializeToml(err) => write!(f, "failed to deserialize toml: {}", err),
+            Error::AddrParse(err) => write!(f, "failed to parse ip address: {err}"),
+            Error::BaseDirectories(err) => write!(f, "base directory error: {err}"),
+            Error::Crypto(err) => write!(f, "ssb cryptographic error: {err}"),
+            Error::Database(err) => write!(f, "key-value database error: {err}"),
+            Error::DeserializeToml(err) => write!(f, "failed to deserialize toml: {err}"),
             // TODO: Attach context so we know the identity of the offending message.
             Error::InvalidSequence => write!(
                 f,
                 "validation error. message contains incorrect sequence number"
             ),
-            Error::Io(err) => write!(f, "i/o error: {}", err),
-            Error::LanDiscovery(err) => write!(f, "lan udp discovery error: {}", err),
-            Error::MuxRpc(err) => write!(f, "muxrpc error: {}", err),
-            Error::SecretHandshake(err) => write!(f, "secret handshake error: {}", err),
-            Error::SerdeCbor(err) => write!(f, "serde cbor error: {}", err),
-            Error::SerdeJson(err) => write!(f, "serde json error: {}", err),
-            Error::SerializeToml(err) => write!(f, "failed to serialize toml: {}", err),
-            Error::SsbApi(err) => write!(f, "ssb api error: {}", err),
-            Error::UrlParse(err) => write!(f, "failed to parse url: {}", err),
-            Error::Validation(err) => write!(f, "message validation error: {}", err),
-            Error::Other(err) => write!(f, "uncategorized error: {}", err),
+            Error::Io(err) => write!(f, "i/o error: {err}"),
+            Error::LanDiscovery(err) => write!(f, "lan udp discovery error: {err}"),
+            Error::MuxRpc(err) => write!(f, "muxrpc error: {err}"),
+            Error::SecretHandshake(err) => write!(f, "secret handshake error: {err}"),
+            Error::SerdeCbor(err) => write!(f, "serde cbor error: {err}"),
+            Error::SerdeJson(err) => write!(f, "serde json error: {err}"),
+            Error::SerializeToml(err) => write!(f, "failed to serialize toml: {err}"),
+            Error::SsbApi(err) => write!(f, "ssb api error: {err}"),
+            Error::UrlParse(err) => write!(f, "failed to parse url: {err}"),
+            Error::Validation(err) => write!(f, "message validation error: {err}"),
+            Error::Other(err) => write!(f, "uncategorized error: {err}"),
         }
     }
 }

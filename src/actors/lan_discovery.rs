@@ -28,7 +28,7 @@ pub async fn actor(
 
     loop {
         // Create a UDP socket with the given address.
-        let socket = UdpSocket::bind(format!("0.0.0.0:{}", rpc_port)).await?;
+        let socket = UdpSocket::bind(format!("0.0.0.0:{rpc_port}")).await?;
         // Allow the socket to send packets to the broadcast address.
         socket.set_broadcast(true)?;
 

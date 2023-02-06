@@ -125,7 +125,7 @@ pub async fn actor_inner(
             }
 
             // Define the server address and port.
-            let server_port = format!("{}:{}", server, port);
+            let server_port = format!("{server}:{port}");
             // Attempt a TCP connection.
             let mut stream = TcpStream::connect(server_port).await?;
 
@@ -180,7 +180,7 @@ pub async fn actor_inner(
             let peer_pk = if ssb_id.starts_with('@') {
                 ssb_id
             } else {
-                format!("@{}", ssb_id)
+                format!("@{ssb_id}")
             };
 
             // Check if we are already connected to the selected peer.

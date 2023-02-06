@@ -138,7 +138,7 @@ impl KvStorage {
     pub fn get_latest_seq(&self, user_id: &str) -> Result<Option<u64>> {
         let db = self.db.as_ref().unwrap();
         let key = Self::key_latest_seq(user_id);
-        let seq = if let Some(value) = db.get(&key)? {
+        let seq = if let Some(value) = db.get(key)? {
             let mut u64_buffer = [0u8; 8];
             u64_buffer.copy_from_slice(&value);
             Some(u64::from_be_bytes(u64_buffer))
@@ -286,7 +286,7 @@ impl KvStorage {
         // Lookup the latest sequence number for the given peer.
         if let Some(latest_seq) = self.get_latest_seq(user_id)? {
             // Iterate through the messages in the feed.
-            for msg_seq in 1..latest_seq {
+            for msg_seq in 1..=latest_seq {
                 // Get the message KVT for the given author and message
                 // sequence number and add it to the feed vector.
                 // TODO: consider handling the `None` case instead of
@@ -313,9 +313,96 @@ mod test {
         let mut kv = KvStorage::default();
         let (sender, _) = futures::channel::mpsc::unbounded();
         let path = tempdir::TempDir::new("solardb").unwrap();
-        let config = KvConfig::new().path(&path.path());
+        let config = KvConfig::new().path(path.path());
         kv.open(config, sender).unwrap();
         kv
+    }
+
+    #[async_std::test]
+    async fn test_feed_length() -> Result<()> {
+        use kuska_ssb::feed::Message;
+        // Create a unique keypair to sign messages.
+        let keypair = SecretConfig::create().owned_identity().unwrap();
+
+        // Open a temporary key-value store.
+        let kv = open_temporary_kv();
+
+        let mut last_msg: Option<Message> = None;
+        for i in 1..=4 {
+            // Create a post-type message.
+            let msg_content = TypedMessage::Post {
+                text: format!("Important announcement #{i}"),
+                mentions: None,
+            };
+
+            let msg = MessageValue::sign(last_msg.as_ref(), &keypair, json!(msg_content)).unwrap();
+
+            // Append the signed message to the feed. Returns the sequence number
+            // of the appended message.
+            let seq = kv.append_feed(msg).await.unwrap();
+            assert_eq!(seq, i);
+
+            last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+
+            let feed = kv.get_feed(&keypair.id).unwrap();
+            assert_eq!(feed.len(), i as usize);
+        }
+
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_single_message_content_matches() -> Result<()> {
+        // Create a unique keypair to sign messages.
+        let keypair = SecretConfig::create().owned_identity().unwrap();
+
+        // Open a temporary key-value store.
+        let kv = open_temporary_kv();
+
+        // Create a post-type message.
+        let msg_content = TypedMessage::Post {
+            text: "A strange rambling expiration of my own conscious".to_string(),
+            mentions: None,
+        };
+
+        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+        let msg = MessageValue::sign(last_msg.as_ref(), &keypair, json!(msg_content)).unwrap();
+
+        // Append the signed message to the feed. Returns the sequence number
+        // of the appended message.
+        let seq = kv.append_feed(msg).await.unwrap();
+        assert_eq!(seq, 1);
+
+        let latest_seq = kv.get_latest_seq(&keypair.id).unwrap();
+        assert_eq!(latest_seq, Some(1));
+
+        // Lookup the value of the previous message. This will be `None`
+        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+        assert!(last_msg.is_some());
+        let expected = serde_json::value::to_value(msg_content).unwrap();
+        let last_msg = last_msg.unwrap().content().clone();
+
+        assert_eq!(last_msg, expected);
+
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_new_feed_is_empty() -> Result<()> {
+        // Create a unique keypair to sign messages.
+        let keypair = SecretConfig::create().owned_identity().unwrap();
+
+        // Open a temporary key-value store.
+        let kv = open_temporary_kv();
+
+        // Lookup the value of the previous message. This will be `None`
+        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+        assert!(last_msg.is_none());
+
+        let latest_seq = kv.get_latest_seq(&keypair.id).unwrap();
+        assert!(latest_seq.is_none());
+
+        Ok(())
     }
 
     // In reality this test covers more than just the append method.
@@ -442,7 +529,7 @@ mod test {
 
         let blob = kv.get_blob("b1")?.unwrap();
 
-        assert_eq!(blob.retrieved, false);
+        assert!(!blob.retrieved);
         assert_eq!(blob.users, ["u7".to_string()].to_vec());
         assert_eq!(
             kv.get_pending_blobs().unwrap(),

@@ -79,7 +79,7 @@ where
                     .await?
             }
             Err(err) => {
-                let msg = format!("{}", err);
+                let msg = format!("{err}");
                 api.rpc().send_error(req_no, req.rpc_type, &msg).await?
             }
         };

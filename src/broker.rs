@@ -185,7 +185,7 @@ impl Broker {
     {
         task::spawn(async move {
             if let Err(e) = fut.await {
-                eprintln!("{}", e)
+                eprintln!("{e}")
             }
         })
     }

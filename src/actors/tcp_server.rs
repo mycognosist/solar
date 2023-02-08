@@ -23,12 +23,8 @@ pub async fn actor(
         select_biased! {
             _ = ch_terminate => break,
             stream = incoming.next().fuse() => {
-                // TODO: pass message to the broker for the connection manager:
-                // ConnectionEvent::Connecting
                 if let Some(stream) = stream {
                     if let Ok(stream) = stream {
-                        // TODO: pass message to the broker for the connection manager:
-                        // ConnectionEvent::Connected
                         Broker::spawn(super::peer::actor(server_id.clone(), super::peer::Connect::ClientStream{stream}, selective_replication));
                     }
                 } else {

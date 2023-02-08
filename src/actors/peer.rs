@@ -1,9 +1,8 @@
-use std::{collections::HashSet, net::Shutdown, time::Duration};
+use std::{net::Shutdown, time::Duration};
 
 use async_std::{
     io::{Read, Write},
     net::TcpStream,
-    sync::{Arc, RwLock},
     task,
 };
 use futures::{pin_mut, select_biased, stream::StreamExt, FutureExt, SinkExt};
@@ -18,7 +17,6 @@ use kuska_ssb::{
     rpc::{RpcReader, RpcWriter},
 };
 use log::{error, info, trace, warn};
-use once_cell::sync::Lazy;
 
 use crate::{
     actors::{
@@ -44,30 +42,37 @@ pub enum Connect {
     },
 }
 
-// TODO: move this to the connection manager
-/// A list (`HashSet`) of public keys representing peers to whom we are
-/// currently connected.
-pub static CONNECTED_PEERS: Lazy<Arc<RwLock<HashSet<ed25519::PublicKey>>>> =
-    Lazy::new(|| Arc::new(RwLock::new(HashSet::new())));
-
 pub async fn actor(id: OwnedIdentity, connect: Connect, selective_replication: bool) -> Result<()> {
     // Register a new connection with the connection manager.
-    let connection_id = CONNECTION_MANAGER.lock().await.register();
+    let connection_id = CONNECTION_MANAGER.write().await.register();
+
+    // Set the connection idle timeout limit according to the connection
+    // manager configuration. This value is used to break out of the peer loop
+    // after n consecutive idle seconds.
+    let connection_idle_timeout_limit = CONNECTION_MANAGER.read().await.idle_timeout_limit;
 
     // Catch any errors which occur during the peer connection and replication.
-    if let Err(err) = actor_inner(id, connect, selective_replication, connection_id).await {
+    if let Err(err) = actor_inner(
+        id,
+        connect,
+        selective_replication,
+        connection_id,
+        connection_idle_timeout_limit,
+    )
+    .await
+    {
         warn!("peer failed: {:?}", err);
 
         let mut ch_broker = BROKER.lock().await.create_sender();
 
-        // Send a connection event.
-        let connecting_msg = BrokerEvent::new(
-            Destination::Broadcast,
-            ConnectionEvent::Error(connection_id, err.to_string()),
-        );
-
-        // Send connection event message via the broker.
-        ch_broker.send(connecting_msg).await.unwrap();
+        // Send 'error' connection event message via the broker.
+        ch_broker
+            .send(BrokerEvent::new(
+                Destination::Broadcast,
+                ConnectionEvent::Error(connection_id, err.to_string()),
+            ))
+            .await
+            .unwrap();
     }
 
     Ok(())
@@ -81,6 +86,7 @@ pub async fn actor_inner(
     connect: Connect,
     selective_replication: bool,
     connection_id: usize,
+    connection_idle_timeout_limit: u8,
 ) -> Result<usize> {
     // Register the "peer" actor endpoint with the broker.
     let ActorEndpoint {
@@ -97,17 +103,14 @@ pub async fn actor_inner(
     // Define the network key to be used for the secret handshake.
     let network_key = NETWORK_KEY.get().unwrap().to_owned();
 
-    // TODO: think of ways to send a directed message instead of broadcast.
-    // All we need is the actor ID of the connection manager.
-    //
-    // Send a connection event.
-    let connecting_msg = BrokerEvent::new(
-        Destination::Broadcast,
-        ConnectionEvent::Connecting(connection_id),
-    );
-
-    // Send connection event message via the broker.
-    ch_broker.send(connecting_msg).await.unwrap();
+    // Send 'connecting' connection event message via the broker.
+    ch_broker
+        .send(BrokerEvent::new(
+            Destination::Broadcast,
+            ConnectionEvent::Connecting(connection_id),
+        ))
+        .await
+        .unwrap();
 
     // Handle a TCP connection event (inbound or outbound).
     let (stream, handshake) = match connect {
@@ -117,10 +120,16 @@ pub async fn actor_inner(
             port,
             peer_pk,
         } => {
+            // TODO: move this check into the scheduler.
+            //
             // First check if we are already connected to the selected peer.
             // If yes, return immediately.
             // If no, continue with the connection attempt.
-            if CONNECTED_PEERS.read().await.contains(&peer_pk) {
+            if CONNECTION_MANAGER
+                .read()
+                .await
+                .contains_connected_peer(&peer_pk)
+            {
                 return Ok(connection_id);
             }
 
@@ -129,49 +138,53 @@ pub async fn actor_inner(
             // Attempt a TCP connection.
             let mut stream = TcpStream::connect(server_port).await?;
 
-            let handshaking_msg = BrokerEvent::new(
-                Destination::Broadcast,
-                ConnectionEvent::Handshaking(connection_id),
-            );
-
-            // Send connection event message via the broker.
-            ch_broker.send(handshaking_msg).await.unwrap();
+            // Send 'handshaking' connection event message via the broker.
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    ConnectionEvent::Handshaking(connection_id),
+                ))
+                .await
+                .unwrap();
 
             // Attempt a secret handshake.
             let handshake = handshake_client(&mut stream, network_key, pk, sk, peer_pk).await?;
 
             info!("💃 connected to peer {}", handshake.peer_pk.to_ssb_id());
 
-            let connected_msg = BrokerEvent::new(
-                Destination::Broadcast,
-                ConnectionEvent::Connected(connection_id),
-            );
-
-            // Send connection event message via the broker.
-            ch_broker.send(connected_msg).await.unwrap();
+            // Send 'connected' connection event message via the broker.
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    ConnectionEvent::Connected(connection_id),
+                ))
+                .await
+                .unwrap();
 
             (stream, handshake)
         }
         // Handle an incoming TCP connection event.
         Connect::ClientStream { mut stream } => {
-            let handshaking_msg = BrokerEvent::new(
-                Destination::Broadcast,
-                ConnectionEvent::Handshaking(connection_id),
-            );
-
-            // Send connection event message via the broker.
-            ch_broker.send(handshaking_msg).await.unwrap();
+            // Send 'handshaking' connection event message via the broker.
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    ConnectionEvent::Handshaking(connection_id),
+                ))
+                .await
+                .unwrap();
 
             // Attempt a secret handshake.
             let handshake = handshake_server(&mut stream, network_key, pk, sk).await?;
 
-            let connected_msg = BrokerEvent::new(
-                Destination::Broadcast,
-                ConnectionEvent::Connected(connection_id),
-            );
-
-            // Send connection event message via the broker.
-            ch_broker.send(connected_msg).await.unwrap();
+            // Send 'connected' connection event message via the broker.
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    ConnectionEvent::Connected(connection_id),
+                ))
+                .await
+                .unwrap();
 
             // Convert the public key to a `String`.
             let ssb_id = handshake.peer_pk.to_ssb_id();
@@ -186,18 +199,24 @@ pub async fn actor_inner(
             // Check if we are already connected to the selected peer.
             // If yes, return immediately.
             // If no, return the stream and handshake.
-            if CONNECTED_PEERS.read().await.contains(&handshake.peer_pk) {
+            if CONNECTION_MANAGER
+                .read()
+                .await
+                .contains_connected_peer(&handshake.peer_pk)
+            {
                 info!("peer {} is already connected", &peer_pk);
 
                 // Since we already have an active connection to this peer,
                 // we can disconnect the redundant connection.
-                let disconnecting_msg = BrokerEvent::new(
-                    Destination::Broadcast,
-                    ConnectionEvent::Disconnecting(connection_id),
-                );
 
-                // Send connection event message via the broker.
-                ch_broker.send(disconnecting_msg).await.unwrap();
+                // Send 'disconnecting' connection event message via the broker.
+                ch_broker
+                    .send(BrokerEvent::new(
+                        Destination::Broadcast,
+                        ConnectionEvent::Disconnecting(connection_id),
+                    ))
+                    .await
+                    .unwrap();
 
                 return Ok(connection_id);
             }
@@ -219,13 +238,14 @@ pub async fn actor_inner(
                     peer_pk
                 );
 
-                let disconnecting_msg = BrokerEvent::new(
-                    Destination::Broadcast,
-                    ConnectionEvent::Disconnecting(connection_id),
-                );
-
                 // Send connection event message via the broker.
-                ch_broker.send(disconnecting_msg).await.unwrap();
+                ch_broker
+                    .send(BrokerEvent::new(
+                        Destination::Broadcast,
+                        ConnectionEvent::Disconnecting(connection_id),
+                    ))
+                    .await
+                    .unwrap();
 
                 // This may not be necessary; the connection should close when
                 // the stream is dropped.
@@ -241,19 +261,20 @@ pub async fn actor_inner(
     // Parse the peer public key from the handshake.
     let peer_pk = handshake.peer_pk;
 
-    // TODO:
-    // Remember to change the placement of this.
-
     // Add the peer to the list of connected peers.
-    CONNECTED_PEERS.write().await.insert(peer_pk);
+    CONNECTION_MANAGER
+        .write()
+        .await
+        .insert_connected_peer(peer_pk);
 
-    let replicating_msg = BrokerEvent::new(
-        Destination::Broadcast,
-        ConnectionEvent::Replicating(connection_id),
-    );
-
-    // Send connection event message via the broker.
-    ch_broker.send(replicating_msg).await.unwrap();
+    // Send 'replicating' connection event message via the broker.
+    ch_broker
+        .send(BrokerEvent::new(
+            Destination::Broadcast,
+            ConnectionEvent::Replicating(connection_id),
+        ))
+        .await
+        .unwrap();
 
     // Spawn the peer loop (responsible for negotiating RPC requests).
     let res = peer_loop(
@@ -263,36 +284,40 @@ pub async fn actor_inner(
         handshake,
         ch_terminate,
         ch_msg.unwrap(),
+        connection_idle_timeout_limit,
     )
     .await;
 
     // Remove the peer from the list of connected peers.
-    CONNECTED_PEERS.write().await.remove(&peer_pk);
+    CONNECTION_MANAGER
+        .write()
+        .await
+        .remove_connected_peer(peer_pk);
 
     if let Err(err) = res {
         warn!("💀 client terminated with error {:?}", err);
 
         // TODO: Use the `ConnectionError` as the type for `err`.
         //
-        // Communicate the disconnection to the connection manager.
-        let error_msg = BrokerEvent::new(
-            Destination::Broadcast,
-            ConnectionEvent::Error(connection_id, err.to_string()),
-        );
-
-        // Send connection event message via the broker.
-        ch_broker.send(error_msg).await.unwrap();
+        // Send 'error' connection event message via the broker.
+        ch_broker
+            .send(BrokerEvent::new(
+                Destination::Broadcast,
+                ConnectionEvent::Error(connection_id, err.to_string()),
+            ))
+            .await
+            .unwrap();
     } else {
         info!("👋 finished connection with {}", &peer_pk.to_ssb_id());
 
-        // Communicate the disconnection to the connection manager.
-        let disconnected_msg = BrokerEvent::new(
-            Destination::Broadcast,
-            ConnectionEvent::Disconnected(connection_id),
-        );
-
-        // Send connection event message via the broker.
-        ch_broker.send(disconnected_msg).await.unwrap();
+        // Send 'disconnected' connection event message via the broker.
+        ch_broker
+            .send(BrokerEvent::new(
+                Destination::Broadcast,
+                ConnectionEvent::Disconnected(connection_id),
+            ))
+            .await
+            .unwrap();
     }
 
     let _ = ch_broker.send(BrokerEvent::Disconnect { actor_id }).await;
@@ -307,11 +332,10 @@ async fn peer_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
     handshake: HandshakeComplete,
     ch_terminate: ChSigRecv,
     mut ch_msg: ChMsgRecv,
+    connection_idle_timeout_limit: u8,
 ) -> Result<()> {
     // Parse the peer public key from the handshake.
     let peer_ssb_id = handshake.peer_pk.to_ssb_id();
-
-    trace!(target: "peer-loop", "initiating peer loop with: {}", peer_ssb_id);
 
     // Instantiate a box stream and split it into reader and writer streams.
     let (box_stream_read, box_stream_write) =
@@ -348,9 +372,17 @@ async fn peer_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
     let rpc_recv_stream = rpc_reader.into_stream().fuse();
     pin_mut!(rpc_recv_stream);
 
-    loop {
-        trace!(target: "peer-loop", "peer loop initiated with: {}", peer_ssb_id);
+    // Instantiate a timer counter.
+    //
+    // This counter is used to break out of the input loop after n consecutive
+    // timer events. Since the sleep duration is currently set to 1 second,
+    // this means that the input loop will be exited after n seconds of idle
+    // activity (ie. no incoming packets or messages).
+    let mut timer_counter = 0;
 
+    trace!(target: "peer-loop", "initiating peer loop with: {}", peer_ssb_id);
+
+    loop {
         // Poll multiple futures and streams simultaneously, executing the
         // branch for the future that finishes first. If multiple futures are
         // ready, one will be selected in order of declaration.
@@ -359,10 +391,14 @@ async fn peer_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
                 break;
             },
             packet = rpc_recv_stream.select_next_some() => {
+                // Reset the timer counter.
+                timer_counter = 0;
                 let (rpc_id, packet) = packet;
-                RpcInput::Network(rpc_id,packet)
+                RpcInput::Network(rpc_id, packet)
             },
             msg = ch_msg.next().fuse() => {
+                // Reset the timer counter.
+                timer_counter = 0;
                 if let Some(msg) = msg {
                     RpcInput::Message(msg)
                 } else {
@@ -370,11 +406,17 @@ async fn peer_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
                 }
             },
             _ = task::sleep(Duration::from_secs(1)).fuse() => {
-                RpcInput::Timer
-            },
+                // Break out of the peer loop if the connection idle timeout
+                // limit has been reached.
+                if timer_counter >= connection_idle_timeout_limit {
+                    break
+                } else {
+                    // Increment the timer counter.
+                    timer_counter += 1;
+                    RpcInput::Timer
+                }
+            }
         };
-
-        trace!(target: "peer-loop", "peer loop input: {:?}", input);
 
         let mut handled = false;
         for handler in handlers.iter_mut() {
@@ -394,6 +436,8 @@ async fn peer_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
             trace!(target: "peer-loop", "message not processed: {:?}", input);
         }
     }
+
+    trace!(target: "peer-loop", "peer loop concluded with: {}", peer_ssb_id);
 
     Ok(())
 }

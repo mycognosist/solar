@@ -106,7 +106,7 @@ async fn main() -> Result<()> {
     }
 
     // Spawn the connection manager message loop.
-    let connection_manager_msgloop = CONNECTION_MANAGER.lock().await.take_msgloop();
+    let connection_manager_msgloop = CONNECTION_MANAGER.write().await.take_msgloop();
     connection_manager_msgloop.await;
 
     // Spawn the broker message loop.

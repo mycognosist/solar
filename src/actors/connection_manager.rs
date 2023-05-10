@@ -244,7 +244,7 @@ mod test {
     async fn test_count_connections() -> Result<()> {
         let connection_manager = instantiate_new_connection_manager();
 
-        let active_connections = connection_manager.read().await.count_connections();
+        let active_connections = connection_manager.read().await._count_connections();
         assert_eq!(active_connections, 0);
 
         Ok(())
@@ -279,7 +279,7 @@ mod test {
         assert_eq!(reinsert_result, false);
 
         // Count the active connections.
-        let connections = connection_manager.read().await.count_connections();
+        let connections = connection_manager.read().await._count_connections();
         assert_eq!(connections, 1);
 
         // Remove a peer from the list of connected peers.
@@ -290,7 +290,7 @@ mod test {
         assert_eq!(remove_result, true);
 
         // Count the active connections.
-        let conns = connection_manager.read().await.count_connections();
+        let conns = connection_manager.read().await._count_connections();
         assert_eq!(conns, 0);
 
         Ok(())

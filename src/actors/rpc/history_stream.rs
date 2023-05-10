@@ -69,15 +69,15 @@ where
                     _ => Ok(false),
                 }
             }
-            // Handle an outgoing MUXRPC response.
+            // Handle an incoming MUXRPC response.
             RpcInput::Network(req_no, rpc::RecvMsg::RpcResponse(_type, res)) => {
                 self.recv_rpc_response(api, ch_broker, *req_no, res).await
             }
-            // Handle an outgoing MUXRPC 'cancel stream' response.
+            // Handle an incoming MUXRPC 'cancel stream' response.
             RpcInput::Network(req_no, rpc::RecvMsg::CancelStreamRespose()) => {
                 self.recv_cancelstream(api, *req_no).await
             }
-            // Handle an outgoing MUXRPC error response.
+            // Handle an incoming MUXRPC error response.
             RpcInput::Network(req_no, rpc::RecvMsg::ErrorResponse(err)) => {
                 self.recv_error_response(api, *req_no, err).await
             }

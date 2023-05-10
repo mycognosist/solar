@@ -488,6 +488,12 @@ mod test {
         // and signed message.
         assert_eq!(msg_val.unwrap(), msg_2_clone);
 
+        // Get all messages comprising the feed.
+        let feed = kv.get_feed(&keypair.id).unwrap();
+
+        // Ensure that two messages are returned.
+        assert_eq!(feed.len(), 2);
+
         Ok(())
     }
 

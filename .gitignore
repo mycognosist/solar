@@ -2,3 +2,4 @@
 **/*.rs.bk
 go_sbot_benchmarks
 /releases
+/cmds

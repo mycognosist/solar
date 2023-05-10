@@ -85,7 +85,7 @@ impl ConnectionManager {
     }
 
     /// Query the number of active peer connections.
-    pub fn count_connections(&self) -> usize {
+    pub fn _count_connections(&self) -> usize {
         self.connected_peers.len()
     }
 

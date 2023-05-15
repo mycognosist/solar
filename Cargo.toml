@@ -1,6 +1,6 @@
 [package]
 name = "solar"
-version = "0.3.2"
+version = "0.3.3"
 authors = ["adria0 <adria@codecontext.io>", "glyph <glyph@mycelial.technology>"]
 edition = "2018"
 default-run = "solar"

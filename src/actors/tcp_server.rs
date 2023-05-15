@@ -4,6 +4,7 @@ use async_std::{
 };
 use futures::{select_biased, FutureExt};
 use kuska_ssb::keystore::OwnedIdentity;
+use log::debug;
 
 use crate::{broker::*, Result};
 
@@ -18,6 +19,7 @@ pub async fn actor(
 
     let listener = TcpListener::bind(addr).await?;
     let mut incoming = listener.incoming();
+    debug!("Listening for inbound TCP connection...");
 
     loop {
         select_biased! {
@@ -25,7 +27,14 @@ pub async fn actor(
             stream = incoming.next().fuse() => {
                 if let Some(stream) = stream {
                     if let Ok(stream) = stream {
-                        Broker::spawn(super::peer::actor(server_id.clone(), super::peer::Connect::ClientStream{stream}, selective_replication));
+                        debug!("Received inbound TCP connection");
+                        Broker::spawn(
+                            super::peer::actor(
+                                server_id.clone(),
+                                super::peer::Connect::ClientStream{stream},
+                                selective_replication
+                            )
+                        );
                     }
                 } else {
                     break;

@@ -1,14 +1,15 @@
 // src/actors/json_rpc_server.rs
 
+use std::net::SocketAddr;
+
 use async_std::task;
 use futures::FutureExt;
-use jsonrpc_http_server::{
-    jsonrpc_core::*, AccessControlAllowOrigin, DomainsValidation, ServerBuilder,
-};
+use jsonrpsee::server::{logger::Params, RpcModule, ServerBuilder};
+use jsonrpsee::types::error::ErrorObject as JsonRpcError;
 use kuska_ssb::{api::dto::content::TypedMessage, feed::Message, keystore::OwnedIdentity};
 use log::{info, warn};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::{broker::*, error::Error, Result, KV_STORAGE};
 
@@ -40,11 +41,16 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: String) -> Result<()> 
 
     let ch_terminate = broker.ch_terminate.fuse();
 
-    let mut io = IoHandler::default();
+    let server = ServerBuilder::default()
+        .http_only()
+        .build(&server_addr.parse::<SocketAddr>()?)
+        .await?;
+
+    let mut rpc_module = RpcModule::new(());
 
     // Retrieve a feed by public key.
     // Returns an array of messages as a KVTs.
-    io.add_sync_method("feed", move |params: Params| {
+    rpc_module.register_method("feed", move |params: Params, _| {
         task::block_on(async {
             // Parse the parameter containing the public key.
             let pub_key: PubKey = params.parse()?;
@@ -57,13 +63,13 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: String) -> Result<()> 
 
             let response = json!(feed);
 
-            Ok(response)
+            Ok::<Value, JsonRpcError>(response)
         })
-    });
+    })?;
 
     // Retrieve a message by key.
     // Returns the message as a KVT.
-    io.add_sync_method("message", move |params: Params| {
+    rpc_module.register_method("message", move |params: Params, _| {
         task::block_on(async {
             // Parse the parameter containing the message reference (key).
             let msg_ref: MsgRef = params.parse()?;
@@ -84,25 +90,25 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: String) -> Result<()> 
 
             let response = json!(msg_kvt);
 
-            Ok(response)
+            Ok::<Value, JsonRpcError>(response)
         })
-    });
+    })?;
 
     // Return the public key and latest sequence number for all feeds in the
     // local database.
-    io.add_sync_method("peers", |_| {
+    rpc_module.register_method("peers", |_, _| {
         task::block_on(async {
             let db = KV_STORAGE.read().await;
             let peers = db.get_peers().await?;
 
             let response = json!(peers);
 
-            Ok(response)
+            Ok::<Value, JsonRpcError>(response)
         })
-    });
+    })?;
 
     // Simple `ping` endpoint.
-    io.add_sync_method("ping", |_| Ok(Value::String("pong!".to_owned())));
+    rpc_module.register_method("ping", |_, _| "pong!")?;
 
     // Clone the local public key (ID) so it can later be captured by the
     // `whoami` closure.
@@ -110,7 +116,7 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: String) -> Result<()> 
 
     // Publish a typed message (raw).
     // Returns the key (hash) and sequence number of the published message.
-    io.add_sync_method("publish", move |params: Params| {
+    rpc_module.register_method("publish", move |params: Params, _| {
         task::block_on(async {
             // Parse the parameter containing the post content.
             let post_content: TypedMessage = params.parse()?;
@@ -137,28 +143,16 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: String) -> Result<()> 
 
             let response = json![{ "msg_ref": msg.id().to_string(), "seq_num": seq }];
 
-            Ok(response)
+            Ok::<Value, JsonRpcError>(response)
         })
-    });
+    })?;
 
     // Return the public key of the local SSB server.
-    io.add_sync_method("whoami", move |_| Ok(Value::String(local_pk.to_owned())));
+    rpc_module.register_method("whoami", move |_, _| local_pk.clone())?;
 
-    let server = ServerBuilder::new(io)
-        .cors(DomainsValidation::AllowOnly(vec![
-            AccessControlAllowOrigin::Null,
-        ]))
-        .start_http(&server_addr.parse()?)?;
-
-    // Create a close handle to be used when the termination signal is
-    // received.
-    let close_handle = server.close_handle();
-
-    // Start the JSON-RPC server in a task.
-    // This allows us to listen for the termination signal (without blocking).
-    task::spawn(async {
-        server.wait();
-    });
+    let addr = server.local_addr()?;
+    let handle = server.start(rpc_module)?;
+    info!("JSON-RPC server started on: {}", addr);
 
     // Listen for termination signal from broker.
     if let Err(err) = ch_terminate.await {
@@ -166,7 +160,7 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: String) -> Result<()> 
     }
 
     // When received, close (stop) the server.
-    close_handle.close();
+    handle.stop()?;
 
     // Then send terminated signal back to broker.
     let _ = broker.ch_terminated.send(Void {});

@@ -1,6 +1,7 @@
 use std::{fmt, io, net};
 
-use jsonrpc_http_server::jsonrpc_core;
+use jsonrpsee::types::error::ErrorObjectOwned as JsonRpcErrorOwned;
+use jsonrpsee::types::error::SERVER_ERROR_MSG;
 use kuska_ssb::{api, crypto, discovery, feed, handshake, rpc};
 use toml::{de, ser};
 
@@ -21,6 +22,8 @@ pub enum Error {
     InvalidSequence,
     /// io::Error.
     Io(io::Error),
+    /// JSON RPC error.
+    JsonRpc(jsonrpsee::core::Error),
     /// LAN UDP discovery error.
     LanDiscovery(discovery::Error),
     /// SSB RPC error.
@@ -59,6 +62,7 @@ impl fmt::Display for Error {
                 "validation error. message contains incorrect sequence number"
             ),
             Error::Io(err) => write!(f, "i/o error: {err}"),
+            Error::JsonRpc(err) => write!(f, "json-rpc error: {err}"),
             Error::LanDiscovery(err) => write!(f, "lan udp discovery error: {err}"),
             Error::MuxRpc(err) => write!(f, "muxrpc error: {err}"),
             Error::SecretHandshake(err) => write!(f, "secret handshake error: {err}"),
@@ -106,6 +110,12 @@ impl From<de::Error> for Error {
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Error {
         Error::Io(err)
+    }
+}
+
+impl From<jsonrpsee::core::Error> for Error {
+    fn from(err: jsonrpsee::core::Error) -> Error {
+        Error::JsonRpc(err)
     }
 }
 
@@ -166,24 +176,18 @@ impl From<feed::Error> for Error {
 // Conversions for errors which occur in the context of a JSON-RPC method call.
 // Crate-local error variants are converted to JSON-RPC errors which are
 // then return to the caller.
-impl From<Error> for jsonrpc_core::Error {
+impl From<Error> for JsonRpcErrorOwned {
     fn from(err: Error) -> Self {
         match &err {
-            Error::SerdeJson(err_msg) => jsonrpc_core::Error {
-                code: jsonrpc_core::ErrorCode::ServerError(-32000),
-                message: err_msg.to_string(),
-                data: None,
-            },
-            Error::UrlParse(err_msg) => jsonrpc_core::Error {
-                code: jsonrpc_core::ErrorCode::ServerError(-32001),
-                message: err_msg.to_string(),
-                data: None,
-            },
-            Error::Validation(err_msg) => jsonrpc_core::Error {
-                code: jsonrpc_core::ErrorCode::ServerError(-32002),
-                message: err_msg.to_string(),
-                data: None,
-            },
+            Error::SerdeJson(err_msg) => {
+                JsonRpcErrorOwned::owned(-32000, SERVER_ERROR_MSG, Some(err_msg.to_string()))
+            }
+            Error::UrlParse(err_msg) => {
+                JsonRpcErrorOwned::owned(-32001, SERVER_ERROR_MSG, Some(err_msg.to_string()))
+            }
+            Error::Validation(err_msg) => {
+                JsonRpcErrorOwned::owned(-32002, SERVER_ERROR_MSG, Some(err_msg.to_string()))
+            }
             _ => todo!(),
         }
     }

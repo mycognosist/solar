@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use async_std::{
+    net::TcpStream,
     sync::{Arc, RwLock},
     task,
     task::JoinHandle,
@@ -36,6 +37,18 @@ impl Connection {
     }
 }
 */
+
+/// Encapsulate inbound and outbound TCP connections.
+pub enum TcpConnection {
+    TcpServer {
+        server: String,
+        port: u16,
+        peer_pk: ed25519::PublicKey,
+    },
+    ClientStream {
+        stream: TcpStream,
+    },
+}
 
 /// Connection events. The `usize` represents the connection ID.
 #[derive(Debug)]

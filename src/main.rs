@@ -10,7 +10,7 @@ mod config;
 mod error;
 mod storage;
 
-use actors::connection_manager::CONNECTION_MANAGER;
+use actors::network::connection_manager::CONNECTION_MANAGER;
 use broker::*;
 use config::ApplicationConfig;
 use storage::{blob::BlobStorage, kv::KvStorage};
@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
     );
 
     // Spawn the TCP server. Facilitates peer connections.
-    Broker::spawn(actors::tcp_server::actor(
+    Broker::spawn(actors::network::tcp_server::actor(
         secret_config.clone(),
         app_config.muxrpc_addr,
         app_config.selective_replication,
@@ -84,19 +84,19 @@ async fn main() -> Result<()> {
     // Spawn the LAN discovery actor. Listens for and broadcasts UDP packets
     // to allow LAN-local peer connections.
     if app_config.lan_discov {
-        Broker::spawn(actors::lan_discovery::actor(
+        Broker::spawn(actors::network::lan_discovery::actor(
             secret_config.clone(),
             app_config.muxrpc_port,
             app_config.selective_replication,
         ));
     }
 
-    // Spawn the peer actor for each set of provided connection parameters.
-    // Facilitates replication.
+    // Spawn the secret handshake actor for each set of provided connection
+    // parameters. Facilitates replication.
     for (_url, server, port, peer_pk) in peer_connections {
-        Broker::spawn(actors::peer::actor(
+        Broker::spawn(actors::network::secret_handshake::actor(
             secret_config.clone(),
-            actors::peer::Connect::TcpServer {
+            actors::network::connection_manager::TcpConnection::TcpServer {
                 server,
                 port,
                 peer_pk,

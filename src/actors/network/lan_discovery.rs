@@ -10,7 +10,7 @@ use log::warn;
 use crate::{broker::*, Result};
 
 /// Register the LAN discovery endpoint, send and receive UDP broadcasts and
-/// spawn a peer actor for each successfully parsed broadcast message.
+/// spawn a secret handshake actor for each successfully parsed broadcast message.
 pub async fn actor(
     server_id: OwnedIdentity,
     rpc_port: u16,
@@ -81,10 +81,10 @@ async fn process_broadcast(
     // Attempt to parse the IP, port and public key from the received UDP
     // broadcast message.
     if let Some((server, port, peer_pk)) = LanBroadcast::parse(&msg) {
-        // Spawn a peer actor with the given connection parameters.
-        Broker::spawn(super::peer::actor(
+        // Spawn a secret handshake actor with the given connection parameters.
+        Broker::spawn(super::secret_handshake::actor(
             server_id.clone(),
-            super::peer::Connect::TcpServer {
+            super::connection_manager::TcpConnection::TcpServer {
                 server,
                 port,
                 peer_pk,

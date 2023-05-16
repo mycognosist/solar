@@ -14,7 +14,7 @@ use kuska_ssb::{
 use log::{info, trace, warn};
 
 use crate::{
-    actors::rpc::handler::{RpcHandler, RpcInput},
+    actors::muxrpc::handler::{RpcHandler, RpcInput},
     broker::ChBrokerSend,
     storage::blob::ToBlobHashId,
     Result, BLOB_STORAGE,

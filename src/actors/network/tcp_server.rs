@@ -29,9 +29,9 @@ pub async fn actor(
                     if let Ok(stream) = stream {
                         debug!("Received inbound TCP connection");
                         Broker::spawn(
-                            super::peer::actor(
+                            super::secret_handshake::actor(
                                 server_id.clone(),
-                                super::peer::Connect::ClientStream{stream},
+                                super::connection_manager::TcpConnection::ClientStream{stream},
                                 selective_replication
                             )
                         );

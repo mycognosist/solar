@@ -2,7 +2,7 @@
 
 [ phase 1: leaner and cleaner ]
 
- - easy wins first
+ x easy wins first
    x bump deps
 	 x handle compiler warnings
 	 x handle clippy warnings
@@ -19,11 +19,11 @@
 
 [ phase 2: improve docs & deepen understanding ]
 
- - let's really understand this thing deeply before adding more to it
- - still need to do a lot of documenting
-   - work through these files first and document for clarity of understanding
-     - src/actors/rpc/history_stream.rs
-     - src/storage/kv.rs
+ x let's really understand this thing deeply before adding more to it
+ x still need to do a lot of documenting
+   x work through these files first and document for clarity of understanding
+     x src/actors/rpc/history_stream.rs
+     x src/storage/kv.rs
 
 [ phase 3: write connection handler ]
 

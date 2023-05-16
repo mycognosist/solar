@@ -75,7 +75,7 @@ async fn main() -> Result<()> {
     // Spawn the JSON-RPC server if the option has been set to true in the
     // CLI arguments. Facilitates operator queries during runtime.
     if app_config.jsonrpc {
-        Broker::spawn(actors::jsonrpc_server::actor(
+        Broker::spawn(actors::jsonrpc::server::actor(
             secret_config.clone(),
             app_config.jsonrpc_addr,
         ));

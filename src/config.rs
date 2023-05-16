@@ -17,16 +17,16 @@ use sled::Config as KvConfig;
 use structopt::StructOpt;
 use url::Url;
 
-use crate::{cli::Cli, Result};
+use crate::{
+    actors::jsonrpc::config::{JSONRPC_IP, JSONRPC_PORT},
+    cli::Cli,
+    Result,
+};
 
 // Define the default IP used for TCP connections (boxstream and MUXRPC).
 const MUXRPC_IP: &str = "0.0.0.0";
 // Define the default port used for TCP connections (boxstream and MUXRPC).
 const MUXRPC_PORT: u16 = 8008;
-// Define the default IP used for the JSON-RPC server.
-const JSONRPC_IP: &str = "127.0.0.1";
-// Define the default port used for the JSON-RPC server.
-const JSONRPC_PORT: u16 = 3030;
 
 // Write once store for the network key (aka. SHS key or caps key).
 pub static NETWORK_KEY: OnceCell<NetworkKey> = OnceCell::new();

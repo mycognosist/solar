@@ -8,7 +8,7 @@ use kuska_ssb::{
 };
 
 use crate::{
-    actors::rpc::handler::{RpcHandler, RpcInput},
+    actors::muxrpc::handler::{RpcHandler, RpcInput},
     broker::ChBrokerSend,
     Result,
 };

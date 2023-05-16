@@ -15,11 +15,11 @@ use log::{error, info, trace, warn};
 
 use crate::{
     actors::{
-        network::connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
-        rpc::{
+        muxrpc::{
             BlobsGetHandler, BlobsWantsHandler, GetHandler, HistoryStreamHandler, RpcHandler,
             RpcInput, WhoAmIHandler,
         },
+        network::connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
     },
     broker::*,
     Result,

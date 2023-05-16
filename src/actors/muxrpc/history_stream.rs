@@ -13,7 +13,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 use crate::{
-    actors::rpc::handler::{RpcHandler, RpcInput},
+    actors::muxrpc::handler::{RpcHandler, RpcInput},
     broker::{BrokerEvent, ChBrokerSend, Destination},
     config::{REPLICATION_CONFIG, RESYNC_CONFIG, SECRET_CONFIG},
     storage::kv::StoKvEvent,

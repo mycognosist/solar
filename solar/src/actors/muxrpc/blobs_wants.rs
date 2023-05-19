@@ -14,8 +14,9 @@ use log::{trace, warn};
 use crate::{
     actors::muxrpc::handler::{RpcHandler, RpcInput},
     broker::{BrokerEvent, ChBrokerSend, Destination},
+    node::BLOB_STORE,
     storage::blob::{StoBlobEvent, ToBlobHashId},
-    Result, BLOB_STORAGE,
+    Result,
 };
 
 enum RpcBlobsWantsEvent {
@@ -264,7 +265,7 @@ where
         trace!(target: "ssb-blob", "wants:{:?}", wants);
 
         for (want, distance) in wants {
-            if let Some(size) = BLOB_STORAGE.read().await.size_of(&want)? {
+            if let Some(size) = BLOB_STORE.read().await.size_of(&want)? {
                 haves.insert(want, size);
             } else {
                 self.peer_wants.insert(want.clone(), Wants::Pending);
@@ -341,7 +342,7 @@ where
             );
         }
 
-        BLOB_STORAGE.write().await.insert(&data).await?;
+        BLOB_STORE.write().await.insert(&data).await?;
         *wants.1 = Wants::Available;
 
         Ok(true)

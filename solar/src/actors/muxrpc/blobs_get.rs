@@ -16,8 +16,9 @@ use log::{info, trace, warn};
 use crate::{
     actors::muxrpc::handler::{RpcHandler, RpcInput},
     broker::ChBrokerSend,
+    node::BLOB_STORE,
     storage::blob::ToBlobHashId,
-    Result, BLOB_STORAGE,
+    Result,
 };
 
 pub enum RpcBlobsGetEvent {
@@ -103,7 +104,7 @@ where
 
         trace!(target: "ssb-blob", "requested blob {}", args.key);
 
-        let data = BLOB_STORAGE.read().await.get(&args.key)?;
+        let data = BLOB_STORE.read().await.get(&args.key)?;
 
         if let Some(expected_size) = args.size {
             if data.len() != expected_size as usize {
@@ -152,7 +153,7 @@ where
                 );
             } else {
                 info!("Received blob {}", received_blob_id);
-                BLOB_STORAGE.write().await.insert(res).await?;
+                BLOB_STORE.write().await.insert(res).await?;
             }
             Ok(true)
         } else {

@@ -10,7 +10,8 @@ use kuska_ssb::{
 use crate::{
     actors::muxrpc::handler::{RpcHandler, RpcInput},
     broker::ChBrokerSend,
-    Result, KV_STORAGE,
+    node::KV_STORE,
+    Result,
 };
 
 pub struct GetHandler<W>
@@ -70,7 +71,7 @@ where
     ) -> Result<bool> {
         let args: Vec<String> = serde_json::from_value(req.args.clone())?;
 
-        let msg_val = KV_STORAGE.read().await.get_msg_val(&args[0]);
+        let msg_val = KV_STORE.read().await.get_msg_val(&args[0]);
         match msg_val {
             Ok(Some(msg)) => api.get_res_send(req_no, &msg).await?,
             Ok(None) => {

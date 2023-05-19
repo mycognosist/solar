@@ -16,8 +16,10 @@ use crate::{
     actors::muxrpc::handler::{RpcHandler, RpcInput},
     broker::{BrokerEvent, ChBrokerSend, Destination},
     config::{REPLICATION_CONFIG, RESYNC_CONFIG, SECRET_CONFIG},
+    node::BLOB_STORE,
+    node::KV_STORE,
     storage::kv::StoKvEvent,
-    Result, BLOB_STORAGE, KV_STORAGE,
+    Result,
 };
 
 /// Regex pattern used to match blob references.
@@ -149,7 +151,7 @@ where
 
                 // Retrieve the sequence number of the most recent message for
                 // this peer from the local key-value store.
-                if let Some(last_seq) = KV_STORAGE.read().await.get_latest_seq(peer_pk)? {
+                if let Some(last_seq) = KV_STORE.read().await.get_latest_seq(peer_pk)? {
                     // Use the latest sequence number to update the request args.
                     args = args.after_seq(last_seq);
                 }
@@ -212,7 +214,7 @@ where
 
             // Retrieve the sequence number of the most recent message for
             // the peer that authored the received message.
-            let last_seq = KV_STORAGE
+            let last_seq = KV_STORE
                 .read()
                 .await
                 .get_latest_seq(&msg.author().to_string())?
@@ -221,7 +223,7 @@ where
             // Validate the sequence number.
             if msg.sequence() == last_seq + 1 {
                 // Append the message to the feed.
-                KV_STORAGE.write().await.append_feed(msg.clone()).await?;
+                KV_STORE.write().await.append_feed(msg.clone()).await?;
 
                 info!(
                     "received msg number {} from {}",
@@ -233,7 +235,7 @@ where
                 // request those blobs if they are not already in the local
                 // blobstore.
                 for key in self.extract_blob_refs(&msg) {
-                    if !BLOB_STORAGE.read().await.exists(&key) {
+                    if !BLOB_STORE.read().await.exists(&key) {
                         let event = super::blobs_get::RpcBlobsGetEvent::Get(dto::BlobsGetIn {
                             key,
                             size: None,
@@ -365,11 +367,7 @@ where
 
         // Lookup the sequence number of the most recently published message
         // in the local feed.
-        let last_seq = KV_STORAGE
-            .read()
-            .await
-            .get_latest_seq(&req_id)?
-            .unwrap_or(0);
+        let last_seq = KV_STORE.read().await.get_latest_seq(&req_id)?.unwrap_or(0);
 
         // Determine if the messages should be sent as message values or as
         // message KVTs (Key Value Timestamp).
@@ -397,7 +395,7 @@ where
             // The "to" value (`last_seq`) is exclusive so we need to add one to
             // include it in the range.
             for n in req.from..(last_seq + 1) {
-                let data = KV_STORAGE.read().await.get_msg_kvt(&req_id, n)?.unwrap();
+                let data = KV_STORE.read().await.get_msg_kvt(&req_id, n)?.unwrap();
                 // Send either the whole KVT or just the value.
                 let data = if with_keys {
                     data.to_string()

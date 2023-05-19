@@ -1,0 +1,28 @@
+[package]
+name = "solar_cli"
+version = "0.3.3"
+authors = ["adria0 <adria@codecontext.io>", "glyph <glyph@mycelial.technology>"]
+edition = "2018"
+license = "AGPL-3.0"
+readme = "README.md"
+repository = "https://github.com/mycognosist/solar"
+default-run = "solar"
+build = "build.rs"
+
+[[bin]]
+name = "solar"
+path = "src/main.rs"
+
+[dependencies]
+async-std = { version = "1", features=["attributes", "tokio1"] }
+env_logger = "0.10"
+hex = "0.4.0"
+kuska-sodiumoxide = "0.2.5-0"
+kuska-ssb = { git =  "https://github.com/Kuska-ssb/ssb", branch = "master" }
+log = "0.4"
+structopt = "0.3"
+xdg = "2.4"
+
+[dependencies.solar]
+version = "~0.3.3"
+path = "../solar"

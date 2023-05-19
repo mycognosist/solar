@@ -1615,7 +1615,6 @@ dependencies = [
  "async-std",
  "async-trait",
  "base64 0.13.1",
- "env_logger",
  "futures",
  "hex",
  "jsonrpsee",
@@ -1630,10 +1629,24 @@ dependencies = [
  "serde_json",
  "sha2",
  "sled",
- "structopt",
  "tempdir",
  "toml",
  "url",
+ "xdg",
+]
+
+[[package]]
+name = "solar_cli"
+version = "0.3.3"
+dependencies = [
+ "async-std",
+ "env_logger",
+ "hex",
+ "kuska-sodiumoxide",
+ "kuska-ssb",
+ "log",
+ "solar",
+ "structopt",
  "xdg",
 ]
 

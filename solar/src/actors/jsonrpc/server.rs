@@ -11,7 +11,7 @@ use log::{info, warn};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::{broker::*, error::Error, Result, KV_STORAGE};
+use crate::{broker::*, error::Error, node::KV_STORE, Result};
 
 /// Message reference containing the key (sha256 hash) of a message.
 /// Used to parse the key from the parameters supplied to the `message`
@@ -56,7 +56,7 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: String) -> Result<()> 
             let pub_key: PubKey = params.parse()?;
 
             // Open the primary KV database for reading.
-            let db = KV_STORAGE.read().await;
+            let db = KV_STORE.read().await;
 
             // Retrieve the message value for the requested message.
             let feed = db.get_feed(&pub_key.pub_key)?;
@@ -75,7 +75,7 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: String) -> Result<()> 
             let msg_ref: MsgRef = params.parse()?;
 
             // Open the primary KV database for reading.
-            let db = KV_STORAGE.read().await;
+            let db = KV_STORE.read().await;
 
             // Retrieve the message value for the requested message.
             let msg_val = db.get_msg_val(&msg_ref.msg_ref)?;
@@ -98,7 +98,7 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: String) -> Result<()> 
     // local database.
     rpc_module.register_method("peers", |_, _| {
         task::block_on(async {
-            let db = KV_STORAGE.read().await;
+            let db = KV_STORE.read().await;
             let peers = db.get_peers().await?;
 
             let response = json!(peers);
@@ -122,7 +122,7 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: String) -> Result<()> 
             let post_content: TypedMessage = params.parse()?;
 
             // Open the primary KV database for writing.
-            let db = KV_STORAGE.write().await;
+            let db = KV_STORE.write().await;
 
             // Lookup the last message published on the local feed.
             // Return `None` if no messages have yet been published on the feed.

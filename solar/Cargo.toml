@@ -1,0 +1,35 @@
+[package]
+name = "solar"
+version = "0.3.3"
+authors = ["adria0 <adria@codecontext.io>", "glyph <glyph@mycelial.technology>"]
+description = "Embeddable Scuttlebutt network node"
+edition = "2018"
+license = "AGPL-3.0"
+readme = "README.md"
+repository = "https://github.com/mycognosist/solar"
+
+[dependencies]
+async-ctrlc = "1"
+async-std = { version = "1", features=["attributes", "tokio1"] }
+async-trait = "0.1"
+base64 = "0.13"
+futures = "0.3"
+hex = "0.4.0"
+jsonrpsee = { version = "0.18.2", features = ["server"] }
+kuska-sodiumoxide = "0.2.5-0"
+kuska-ssb = { git =  "https://github.com/Kuska-ssb/ssb", branch = "master" }
+log = "0.4"
+once_cell = "1.16"
+rand = "0.8"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"
+serde_json = { version = "1", features=["preserve_order", "arbitrary_precision"] }
+sha2 = "0.10"
+sled = "0.34"
+toml = "0.5"
+url = "2.3"
+xdg = "2.4"
+
+[dev-dependencies]
+tempdir = "0.3"

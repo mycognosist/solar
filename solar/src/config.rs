@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf};
 
 use async_std::{
     fs::File,
@@ -7,26 +7,20 @@ use async_std::{
 use kuska_sodiumoxide::crypto::auth::Key as NetworkKey;
 use kuska_ssb::{
     crypto::{ed25519::PublicKey, ToSodiumObject, ToSsbId},
-    discovery,
     keystore::OwnedIdentity,
 };
-use log::{debug, info};
+use log::debug;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use sled::Config as KvConfig;
-use structopt::StructOpt;
 use url::Url;
 
-use crate::{
-    actors::jsonrpc::config::{JSONRPC_IP, JSONRPC_PORT},
-    cli::Cli,
-    Result,
-};
+use crate::Result;
 
 // Define the default IP used for TCP connections (boxstream and MUXRPC).
-const MUXRPC_IP: &str = "0.0.0.0";
+pub const MUXRPC_IP: &str = "0.0.0.0";
 // Define the default port used for TCP connections (boxstream and MUXRPC).
-const MUXRPC_PORT: u16 = 8008;
+pub const MUXRPC_PORT: u16 = 8008;
 
 // Write once store for the network key (aka. SHS key or caps key).
 pub static NETWORK_KEY: OnceCell<NetworkKey> = OnceCell::new();
@@ -90,92 +84,16 @@ pub struct ApplicationConfig {
 }
 
 impl ApplicationConfig {
-    /// Parse the configuration options provided via the CLI and environment
-    /// variables, fall back to defaults when necessary and return the
-    /// application configuration.
-    pub fn from_cli() -> Result<ApplicationConfig> {
-        let cli_args = Cli::from_args();
-
-        // Retrieve application configuration parameters from the parsed CLI input.
-        // Set defaults if options have not been provided.
-        let lan_discov = cli_args.lan.unwrap_or(false);
-        let muxrpc_ip = cli_args.ip.unwrap_or_else(|| MUXRPC_IP.to_string());
-        let muxrpc_port = cli_args.port.unwrap_or(MUXRPC_PORT);
-        let muxrpc_addr = format!("{muxrpc_ip}:{muxrpc_port}");
-        let jsonrpc = cli_args.jsonrpc.unwrap_or(true);
-        let resync = cli_args.resync.unwrap_or(false);
-        let selective_replication = cli_args.selective.unwrap_or(true);
-
-        // Set the JSON-RPC server IP address.
-        // First check for an env var before falling back to the default.
-        let jsonrpc_ip = match env::var("SOLAR_JSONRPC_IP") {
-            Ok(ip) => ip,
-            Err(_) => JSONRPC_IP.to_string(),
-        };
-        // Set the JSON-RPC server port number.
-        // First check for an env var before falling back to the default.
-        let jsonrpc_port = match env::var("SOLAR_JSONRPC_PORT") {
-            Ok(port) => port,
-            Err(_) => JSONRPC_PORT.to_string(),
-        };
-        let jsonrpc_addr = format!("{jsonrpc_ip}:{jsonrpc_port}");
-
-        // Read KV database cache capacity setting from environment variable.
-        // Define default value (1 GB) if env var is unset.
-        let kv_cache_capacity: u64 = match env::var("SOLAR_KV_CACHE_CAPACITY") {
-            Ok(val) => val.parse().unwrap_or(1000 * 1000 * 1000),
-            Err(_) => 1000 * 1000 * 1000,
-        };
-
-        // Define the default HMAC-SHA-512-256 key for secret handshakes.
-        // This is also sometimes known as the SHS key, caps key or network key.
-        let network_key = match env::var("SOLAR_NETWORK_KEY") {
-            Ok(key) => NetworkKey::from_slice(&hex::decode(key)
-                .expect("shs key supplied via SOLAR_NETWORK_KEY env var is not valid hex"))
-                .expect("failed to instantiate an authentication key from the supplied shs key; check byte length"),
-            Err(_) => discovery::ssb_net_id(),
-        };
-
-        // Create the root data directory for solar.
-        // This is the path at which application data is stored, including the
-        // public-private keypair, key-value database and blob store.
-        let base_path = cli_args
-            .data
-            .unwrap_or(xdg::BaseDirectories::new()?.create_data_directory("solar")?);
-
-        info!("Base directory is {:?}", base_path);
-
-        let app_config = ApplicationConfig {
-            base_path,
-            blobs_folder: PathBuf::new(),
-            connect: cli_args.connect,
-            feeds_folder: PathBuf::new(),
-            jsonrpc,
-            jsonrpc_addr,
-            kv_cache_capacity,
-            lan_discov,
-            muxrpc_ip,
-            muxrpc_port,
-            muxrpc_addr,
-            network_key,
-            replicate: cli_args.replicate,
-            resync,
-            selective_replication,
-        };
-
-        Ok(app_config)
-    }
-
     /// Configure the application based on CLI options, environment variables
     /// and defaults.
-    pub async fn configure() -> Result<(
+    pub async fn configure(
+        mut application_config: ApplicationConfig,
+    ) -> Result<(
         ApplicationConfig,
         KvConfig,
         Vec<(Url, String, u16, PublicKey)>,
         OwnedIdentity,
     )> {
-        let mut application_config = ApplicationConfig::from_cli()?;
-
         let mut secret_key_file = application_config.base_path.clone();
         let mut replication_config_file = application_config.base_path.clone();
         let mut feeds_folder = application_config.base_path.clone();

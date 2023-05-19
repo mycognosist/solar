@@ -11,7 +11,7 @@ use kuska_ssb::crypto::ed25519;
 use log::trace;
 use once_cell::sync::Lazy;
 
-use crate::{ActorEndpoint, BROKER};
+use crate::broker::{ActorEndpoint, BROKER};
 
 /*
 /// All possible errors while negotiating connections.

@@ -129,7 +129,11 @@ impl ApplicationConfig {
         // `peer_connections` vector.
         if let Some(connect) = &application_config.connect {
             for peer_url in connect.split(',') {
-                let parsed_url = Url::parse(peer_url)?;
+                let parsed_url = Url::parse(peer_url).map_err(|e| {
+                    eprintln!("failed to parse peer connection URL: {}", peer_url);
+                    eprintln!("error: {}", e);
+                    e
+                })?;
                 // Retrieve the host from the URL.
                 let server = parsed_url
                     .host()

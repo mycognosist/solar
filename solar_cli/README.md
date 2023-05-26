@@ -15,28 +15,39 @@ Commandline interface for solar: a minimal Secure Scuttlebutt node capable of li
 `solar --help`
 
 ```
-🌞 Solar 0.3.2-1bb6bed
-Sunbathing scuttlecrabs in kuskaland
+🌞 Solar: Sunbathing scuttlecrabs in kuskaland
 
-USAGE:
-    solar [OPTIONS]
+Usage: solar [OPTIONS]
 
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-
-OPTIONS:
-    -c, --connect <connect>        Connect to peers (e.g. host:port:publickey, host:port:publickey)
-    -d, --data <data>              Where data is stored (default: ~/.local/share/local)
-    -i, --ip <ip>                  IP to bind (default: 0.0.0.0)
-    -j, --jsonrpc <jsonrpc>        Run the JSON-RPC server (default: true)
-    -l, --lan <lan>                Run LAN discovery (default: false)
-    -p, --port <port>              Port to bind (default: 8008)
-    -r, --replicate <replicate>    List of peers to replicate; "connect" magic word means that peers specified with
-                                   --connect are added to the replication list
-        --resync <resync>          Resync the local database by requesting the local feed from peers
-    -s, --selective <selective>    Only replicate with peers whose public keys are stored in `replication.toml`
-                                   (default: true)
+Options:
+  -d, --data-dir <DATA_DIR>
+          Directory where data is stored (default: ~/.local/share/local)
+      --database-cache-capacity <DATABASE_CACHE_CAPACITY>
+          Cache capacity of the key-value database in bytes (default: 1000000000)
+  -c, --connect <CONNECT>
+          Connect to a remote peer by specifying a URL (e.g. tcp://<host>:<port>?shs=<public key>). Pass a comma-separated list of URLs to connect to multiple peers (no spaces)
+  -i, --ip <IP>
+          IP to bind for TCP server (default: 0.0.0.0)
+  -p, --port <PORT>
+          Port to bind for TCP server (default: 8008)
+  -n, --network-key <NETWORK_KEY>
+          Network key to be used during the secret handshake (aka. SHS key or caps key) (default: d4a1cb88a66f02f8db635ce26441cc5dac1b08420ceaac230839b755845a9ffb)
+  -l, --lan <LAN>
+          Run LAN discovery (default: false) [possible values: true, false]
+  -j, --jsonrpc <JSONRPC>
+          Run the JSON-RPC server (default: true) [possible values: true, false]
+      --jsonrpc-ip <JSONRPC_IP>
+          IP to bind for JSON-RPC server (default: 127.0.0.1)
+      --jsonrpc-port <JSONRPC_PORT>
+          Port to bind for JSON-RPC server (default: 3030)
+      --resync <RESYNC>
+          Resync the local database by requesting the local feed from peers [possible values: true, false]
+  -s, --selective <SELECTIVE>
+          Only replicate with peers whose public keys are stored in `replication.toml` (default: true) [possible values: true, false]
+  -h, --help
+          Print help
+  -V, --version
+          Print version
 ```
 
 ### Examples
@@ -59,15 +70,7 @@ Attempt a connection with a peer:
 
 ### Environment Variables
 
-Additional configuration parameters can be supplied via environment variables.
-
-```
-RUST_LOG
-SOLAR_JSONRPC_IP
-SOLAR_JSONRPC_PORT
-SOLAR_KV_CACHE_CAPACITY
-SOLAR_NETWORK_KEY
-```
+Log-level can be defined by setting the `RUST_LOG` environment variable.
 
 ## JSON-RPC API
 

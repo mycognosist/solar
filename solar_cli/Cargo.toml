@@ -15,13 +15,13 @@ path = "src/main.rs"
 
 [dependencies]
 async-std = { version = "1", features=["attributes", "tokio1"] }
+clap = { version = "4.1.8", features = ["derive"] }
 env_logger = "0.10"
 hex = "0.4.0"
 kuska-sodiumoxide = "0.2.5-0"
 kuska-ssb = { git =  "https://github.com/Kuska-ssb/ssb", branch = "master" }
 log = "0.4"
-structopt = "0.3"
-xdg = "2.4"
+url = "2.3"
 
 [dependencies.solar]
 version = "~0.3.3"

@@ -1,6 +1,10 @@
 # 🌞 Solar
 
-A minimal Secure Scuttlebutt node capable of lightweight replication and feed storage.
+A minimal, embeddable Secure Scuttlebutt node capable of lightweight replication
+and feed storage.
+
+The node can be run as a [commandline application](https://github.com/mycognosist/solar/blob/main/solar_cli)
+or embedded into another Rust application as a [library](https://github.com/mycognosist/solar/blob/main/solar).
 
 :warning: **Solar is alpha software; expect breaking changes** :construction:
 
@@ -51,7 +55,30 @@ cargo build --release
 
 ## Usage
 
-`solar`
+Embed solar into a Rust application:
+
+```rust
+use solar::{ApplicationConfig, Node};
+
+let config = ApplicationConfig::default();
+let node = Node::start(config).await;
+```
+
+Or run it as a commandline application:
+
+```
+# Run the debug build
+cargo run
+
+# Build the release build
+cargo build --release
+
+# Run the release build with logging
+RUST_LOG=info ./target/release/solar
+```
+
+See the [commandline application README](https://github.com/mycognosist/solar/blob/main/solar_cli/README.md)
+for a full list of usage options.
 
 ### Examples
 
@@ -70,35 +97,6 @@ Enable log reporting at the `debug` level:
 Attempt a connection with a peer:
 
 `solar --connect "tcp://[200:df93:fed8:e5ff:5c43:eab7:6c74:9d94]:8010?shs=MDErHCTxklXc7QZ43fnyzERbRJ7fccRfCYF11EqIFEI="`
-
-### Options
-
-`solar --help`
-
-```
-🌞 Solar 0.3.2-1bb6bed
-Sunbathing scuttlecrabs in kuskaland
-
-USAGE:
-    solar [OPTIONS]
-
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-
-OPTIONS:
-    -c, --connect <connect>        Connect to peers (e.g. host:port:publickey, host:port:publickey)
-    -d, --data <data>              Where data is stored (default: ~/.local/share/local)
-    -i, --ip <ip>                  IP to bind (default: 0.0.0.0)
-    -j, --jsonrpc <jsonrpc>        Run the JSON-RPC server (default: true)
-    -l, --lan <lan>                Run LAN discovery (default: false)
-    -p, --port <port>              Port to bind (default: 8008)
-    -r, --replicate <replicate>    List of peers to replicate; "connect" magic word means that peers specified with
-                                   --connect are added to the replication list
-        --resync <resync>          Resync the local database by requesting the local feed from peers
-    -s, --selective <selective>    Only replicate with peers whose public keys are stored in `replication.toml`
-                                   (default: true)
-```
 
 ## Configuration
 
@@ -127,15 +125,7 @@ Alternatively, peers can be added to the replication configuration via CLI optio
 
 ### Environment Variables
 
-Additional configuration parameters can be supplied via environment variables.
-
-```
-RUST_LOG
-SOLAR_JSONRPC_IP
-SOLAR_JSONRPC_PORT
-SOLAR_KV_CACHE_CAPACITY
-SOLAR_NETWORK_KEY
-```
+Log-level can be defined by setting the `RUST_LOG` environment variable.
 
 ## JSON-RPC API
 

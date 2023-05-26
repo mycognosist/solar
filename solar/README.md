@@ -58,15 +58,7 @@ Alternatively, peers can be added to the replication configuration via CLI optio
 
 ### Environment Variables
 
-Additional configuration parameters can be supplied via environment variables.
-
-```
-RUST_LOG
-SOLAR_JSONRPC_IP
-SOLAR_JSONRPC_PORT
-SOLAR_KV_CACHE_CAPACITY
-SOLAR_NETWORK_KEY
-```
+Log-level can be defined by setting the `RUST_LOG` environment variable.
 
 ## JSON-RPC API
 

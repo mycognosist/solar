@@ -15,7 +15,7 @@ use regex::Regex;
 use crate::{
     actors::muxrpc::handler::{RpcHandler, RpcInput},
     broker::{BrokerEvent, ChBrokerSend, Destination},
-    config::{REPLICATION_CONFIG, RESYNC_CONFIG, SECRET_CONFIG},
+    config::{PEERS_TO_REPLICATE, RESYNC_CONFIG, SECRET_CONFIG},
     node::BLOB_STORE,
     node::KV_STORE,
     storage::kv::StoKvEvent,
@@ -132,18 +132,18 @@ where
             if *RESYNC_CONFIG.get().unwrap() {
                 info!("database resync selected; requesting local feed from peers");
                 // Read the local public key from the secret config file.
-                let local_id = &SECRET_CONFIG.get().unwrap().id;
+                let local_public_key = &SECRET_CONFIG.get().unwrap().public_key;
                 // Create a history stream request for the local feed.
-                let args = dto::CreateHistoryStreamIn::new(local_id.clone()).after_seq(1);
+                let args = dto::CreateHistoryStreamIn::new(local_public_key.clone()).after_seq(1);
                 let req_id = api.create_history_stream_req_send(&args).await?;
 
-                // Insert the history stream request ID and peer ID
-                // (public key) into the peers hash map.
-                self.peers.insert(req_id, local_id.to_string());
+                // Insert the history stream request ID and peer public key
+                // into the peers hash map.
+                self.peers.insert(req_id, local_public_key.to_string());
             }
 
             // Loop through the public keys of all peers in the replication list.
-            for peer_pk in REPLICATION_CONFIG.get().unwrap().peers.keys() {
+            for peer_pk in PEERS_TO_REPLICATE.get().unwrap().keys() {
                 // Instantiate the history stream request args for the given peer.
                 // The `live` arg means: keep the connection open after initial
                 // replication.

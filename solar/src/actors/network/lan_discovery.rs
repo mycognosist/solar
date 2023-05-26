@@ -19,8 +19,8 @@ pub async fn actor(
     // Instantiate a new LAN broadcaster with the given public key and port.
     let broadcaster = LanBroadcast::new(&server_id.pk, rpc_port).await?;
 
-    // Register the "lan_discover" actor endpoint with the broker.
-    let broker = BROKER.lock().await.register("lan_discover", false).await?;
+    // Register the "lan_discovery" actor endpoint with the broker.
+    let broker = BROKER.lock().await.register("lan_discovery", false).await?;
     // Fuse internal termination channel with external channel.
     // This allows termination of the peer loop to be initiated from outside
     // this function.
@@ -45,9 +45,13 @@ pub async fn actor(
                 // `amt` is the number of bytes read.
                 if let Ok((amt, _)) = recv {
                     // Process the received data. Log any errors.
-                    if let Err(err) = process_broadcast(&server_id, &buf[..amt], selective_replication).await {
-                        warn!("failed to process broadcast: {:?}", err);
-                    }
+                    if let Err(err) = process_broadcast(
+                        &server_id,
+                        &buf[..amt],
+                        selective_replication
+                        ).await {
+                            warn!("failed to process broadcast: {:?}", err);
+                        }
                 }
             }
             // Sleep for 5 seconds.
@@ -78,16 +82,17 @@ async fn process_broadcast(
 ) -> Result<()> {
     let msg = String::from_utf8_lossy(buff);
 
-    // Attempt to parse the IP, port and public key from the received UDP
-    // broadcast message.
-    if let Some((server, port, peer_pk)) = LanBroadcast::parse(&msg) {
+    // Attempt to parse the IP / hostname, port and public key from the received
+    // UDP broadcast message.
+    if let Some((server, port, peer_public_key)) = LanBroadcast::parse(&msg) {
+        let addr = format!("{server}:{port}");
+
         // Spawn a secret handshake actor with the given connection parameters.
         Broker::spawn(super::secret_handshake::actor(
             server_id.clone(),
-            super::connection_manager::TcpConnection::TcpServer {
-                server,
-                port,
-                peer_pk,
+            super::connection_manager::TcpConnection::Dial {
+                addr,
+                peer_public_key,
             },
             selective_replication,
         ));

@@ -32,7 +32,7 @@ struct PubKey {
 ///
 /// Listens for a termination signal from the broker. When received, the
 /// JSON-RPC server is closed and a terminated signal is sent to the broker.
-pub async fn actor(server_id: OwnedIdentity, server_addr: String) -> Result<()> {
+pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<()> {
     let broker = BROKER
         .lock()
         .await
@@ -43,7 +43,7 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: String) -> Result<()> 
 
     let server = ServerBuilder::default()
         .http_only()
-        .build(&server_addr.parse::<SocketAddr>()?)
+        .build(&server_addr)
         .await?;
 
     let mut rpc_module = RpcModule::new(());

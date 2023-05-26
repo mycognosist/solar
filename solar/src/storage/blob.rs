@@ -36,12 +36,14 @@ impl BlobStorage {
         self.path = Some(path);
         self.ch_broker = Some(ch_broker);
     }
+
     fn path_of(&self, id: &str) -> PathBuf {
         let id = id.replace('&', "").replace('/', "_");
         [self.path.as_ref().unwrap(), Path::new(&id)]
             .iter()
             .collect()
     }
+
     pub fn size_of(&self, id: &str) -> Result<Option<u64>> {
         if let Ok(metadata) = std::fs::metadata(self.path_of(id)) {
             Ok(Some(metadata.len()))
@@ -49,6 +51,7 @@ impl BlobStorage {
             Ok(None)
         }
     }
+
     pub async fn insert<D: AsRef<[u8]>>(&self, content: D) -> Result<String> {
         let id = content.as_ref().blob_hash_id();
         File::create(self.path_of(&id))?.write_all(content.as_ref())?;
@@ -64,12 +67,14 @@ impl BlobStorage {
 
         Ok(id)
     }
+
     pub fn get(&self, id: &str) -> Result<Vec<u8>> {
         let mut file = File::open(self.path_of(id))?;
         let mut content = Vec::with_capacity(file.metadata()?.len() as usize);
         file.read_to_end(&mut content)?;
         Ok(content)
     }
+
     pub fn exists(&self, id: &str) -> bool {
         self.path_of(id).exists()
     }

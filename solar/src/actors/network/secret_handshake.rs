@@ -12,7 +12,7 @@ use log::{info, warn};
 use crate::{
     actors::network::connection_manager::{ConnectionEvent, TcpConnection, CONNECTION_MANAGER},
     broker::*,
-    config::{NETWORK_KEY, REPLICATION_CONFIG},
+    config::{NETWORK_KEY, PEERS_TO_REPLICATE},
     Result,
 };
 
@@ -77,10 +77,9 @@ pub async fn actor_inner(
     // Handle a TCP connection event (inbound or outbound).
     let (stream, handshake) = match connection {
         // Handle an outbound TCP connection event.
-        TcpConnection::TcpServer {
-            server,
-            port,
-            peer_pk,
+        TcpConnection::Dial {
+            addr,
+            peer_public_key,
         } => {
             // TODO: move this check into the scheduler.
             //
@@ -90,15 +89,13 @@ pub async fn actor_inner(
             if CONNECTION_MANAGER
                 .read()
                 .await
-                .contains_connected_peer(&peer_pk)
+                .contains_connected_peer(&peer_public_key)
             {
                 return Ok(connection_id);
             }
 
-            // Define the server address and port.
-            let server_port = format!("{server}:{port}");
             // Attempt a TCP connection.
-            let mut stream = TcpStream::connect(server_port).await?;
+            let mut stream = TcpStream::connect(addr).await?;
 
             // Send 'handshaking' connection event message via the broker.
             ch_broker
@@ -110,7 +107,9 @@ pub async fn actor_inner(
                 .unwrap();
 
             // Attempt a secret handshake.
-            let handshake = handshake_client(&mut stream, network_key, pk, sk, peer_pk).await?;
+            let handshake =
+                handshake_client(&mut stream, network_key.to_owned(), pk, sk, peer_public_key)
+                    .await?;
 
             info!("💃 connected to peer {}", handshake.peer_pk.to_ssb_id());
 
@@ -126,7 +125,7 @@ pub async fn actor_inner(
             (stream, handshake)
         }
         // Handle an incoming TCP connection event.
-        TcpConnection::ClientStream { mut stream } => {
+        TcpConnection::Listen { mut stream } => {
             // Send 'handshaking' connection event message via the broker.
             ch_broker
                 .send(BrokerEvent::new(
@@ -137,7 +136,7 @@ pub async fn actor_inner(
                 .unwrap();
 
             // Attempt a secret handshake.
-            let handshake = handshake_server(&mut stream, network_key, pk, sk).await?;
+            let handshake = handshake_server(&mut stream, network_key.to_owned(), pk, sk).await?;
 
             // Send 'connected' connection event message via the broker.
             ch_broker
@@ -152,7 +151,7 @@ pub async fn actor_inner(
             let ssb_id = handshake.peer_pk.to_ssb_id();
 
             // Add the sigil link ('@') if it's missing.
-            let peer_pk = if ssb_id.starts_with('@') {
+            let peer_public_key = if ssb_id.starts_with('@') {
                 ssb_id
             } else {
                 format!("@{ssb_id}")
@@ -166,7 +165,7 @@ pub async fn actor_inner(
                 .await
                 .contains_connected_peer(&handshake.peer_pk)
             {
-                info!("peer {} is already connected", &peer_pk);
+                info!("peer {} is already connected", &peer_public_key);
 
                 // Since we already have an active connection to this peer,
                 // we can disconnect the redundant connection.
@@ -183,21 +182,20 @@ pub async fn actor_inner(
                 return Ok(connection_id);
             }
 
-            info!("💃 received connection from peer {}", &peer_pk);
+            info!("💃 received connection from peer {}", &peer_public_key);
 
             // Shutdown the connection if the peer is not in the list of peers
             // to be replicated, unless replication is set to nonselective.
             // This ensures we do not replicate with unknown peers.
             if selective_replication
-                & !REPLICATION_CONFIG
+                & !PEERS_TO_REPLICATE
                     .get()
                     .unwrap()
-                    .peers
-                    .contains_key(&peer_pk)
+                    .contains_key(&peer_public_key)
             {
                 info!(
                     "peer {} is not in replication list and selective replication is enabled; dropping connection",
-                    peer_pk
+                    peer_public_key
                 );
 
                 // Send connection event message via the broker.
@@ -221,13 +219,13 @@ pub async fn actor_inner(
     };
 
     // Parse the peer public key from the handshake.
-    let peer_pk = handshake.peer_pk;
+    let peer_public_key = handshake.peer_pk;
 
     // Add the peer to the list of connected peers.
     CONNECTION_MANAGER
         .write()
         .await
-        .insert_connected_peer(peer_pk);
+        .insert_connected_peer(peer_public_key);
 
     // Spawn the classic replication actor.
     Broker::spawn(crate::actors::replication::classic::actor(
@@ -235,7 +233,7 @@ pub async fn actor_inner(
         stream.clone(),
         stream,
         handshake,
-        peer_pk,
+        peer_public_key,
     ));
 
     Ok(connection_id)

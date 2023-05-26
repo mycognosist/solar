@@ -40,14 +40,18 @@ impl Connection {
 
 /// Encapsulate inbound and outbound TCP connections.
 pub enum TcpConnection {
-    TcpServer {
-        server: String,
-        port: u16,
-        peer_pk: ed25519::PublicKey,
+    /// An outbound TCP connection.
+    Dial {
+        // TODO: addr: SocketAddr (instead of server and port)
+        //server: String,
+        //port: u16,
+        /// The address of a remote peer.
+        addr: String,
+        /// The public key of a remote peer.
+        peer_public_key: ed25519::PublicKey,
     },
-    ClientStream {
-        stream: TcpStream,
-    },
+    /// An inbound TCP connection.
+    Listen { stream: TcpStream },
 }
 
 /// Connection events. The `usize` represents the connection ID.

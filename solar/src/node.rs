@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use async_std::sync::{Arc, RwLock};
 use futures::SinkExt;
 use once_cell::sync::Lazy;
@@ -29,77 +31,87 @@ pub struct Node;
 impl Node {
     /// Start the solar node with full storage and networking capabilities.
     pub async fn start(config: ApplicationConfig) -> Result<()> {
-        // Configure the application.
-        let (app_config, kv_store_config, peer_connections, secret_config) =
-            ApplicationConfig::configure(config).await?;
-
         // Open the key-value store using the given configuration parameters and
         // an unbounded sender channel for message passing.
         KV_STORE
             .write()
             .await
-            .open(kv_store_config, BROKER.lock().await.create_sender())?;
+            .open(config.database, BROKER.lock().await.create_sender())?;
+
+        // Define the directory name for the blob store.
+        let blobs_path = config
+            .base_path
+            .expect("Base path not supplied")
+            .join("blobs");
 
         // Open the blobstore using the given folder path and an unbounded sender
         // channel for message passing.
         BLOB_STORE
             .write()
             .await
-            .open(app_config.blobs_folder, BROKER.lock().await.create_sender());
+            .open(blobs_path, BROKER.lock().await.create_sender());
 
         // Spawn the ctrlc actor. Listens for SIGINT termination signal.
         Broker::spawn(crate::actors::ctrlc::actor());
 
         // Print 'starting server' announcement.
         println!(
-            "Starting TCP server on {}:{}",
-            &app_config.muxrpc_addr,
-            base64::encode(&secret_config.pk[..]),
+            "Starting TCP server on {}:{}:{}",
+            &config.network.ip,
+            &config.network.port,
+            base64::encode(&config.secret.private_key[..]),
         );
+
+        // Construct the TCP server listening address.
+        let tcp_server_addr: SocketAddr =
+            format!("{}:{}", config.network.ip, config.network.port).parse()?;
 
         // Spawn the TCP server. Facilitates peer connections.
         Broker::spawn(tcp_server::actor(
-            secret_config.clone(),
-            app_config.muxrpc_addr,
-            app_config.selective_replication,
+            config.secret.to_owned_identity()?,
+            tcp_server_addr,
+            config.replication.selective,
         ));
 
         // Print the network key.
         println!(
             "Node deploy on network: {}",
-            hex::encode(app_config.network_key)
+            hex::encode(config.network.key)
         );
+
+        // Construct the JSON-RPC server listening address.
+        let jsonrpc_server_addr: SocketAddr =
+            format!("{}:{}", config.jsonrpc.ip, config.jsonrpc.port).parse()?;
 
         // Spawn the JSON-RPC server if the option has been set to true in the
         // CLI arguments. Facilitates operator queries during runtime.
-        if app_config.jsonrpc {
+        if config.jsonrpc.server {
             Broker::spawn(jsonrpc::server::actor(
-                secret_config.clone(),
-                app_config.jsonrpc_addr,
+                config.secret.to_owned_identity()?,
+                jsonrpc_server_addr,
             ));
         }
 
         // Spawn the LAN discovery actor. Listens for and broadcasts UDP packets
         // to allow LAN-local peer connections.
-        if app_config.lan_discov {
+        if config.network.lan_discovery {
             Broker::spawn(lan_discovery::actor(
-                secret_config.clone(),
-                app_config.muxrpc_port,
-                app_config.selective_replication,
+                config.secret.to_owned_identity()?,
+                config.network.port,
+                config.replication.selective,
             ));
         }
 
         // Spawn the secret handshake actor for each set of provided connection
-        // parameters. Facilitates replication.
-        for (_url, server, port, peer_pk) in peer_connections {
+        // parameters. This results in an outbound connection attempt.
+        for (addr, peer_public_key) in config.network.connect {
             Broker::spawn(secret_handshake::actor(
-                secret_config.clone(),
-                connection_manager::TcpConnection::TcpServer {
-                    server,
-                    port,
-                    peer_pk,
+                config.secret.to_owned_identity()?,
+                connection_manager::TcpConnection::Dial {
+                    addr,
+                    peer_public_key,
                 },
-                app_config.selective_replication,
+                config.replication.selective,
             ));
         }
 

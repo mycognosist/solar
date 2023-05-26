@@ -31,7 +31,7 @@ pub async fn actor(
                         Broker::spawn(
                             super::secret_handshake::actor(
                                 server_id.clone(),
-                                super::connection_manager::TcpConnection::ClientStream{stream},
+                                super::connection_manager::TcpConnection::Listen{ stream },
                                 selective_replication
                             )
                         );

@@ -212,7 +212,7 @@ impl ConnectionManager {
 mod test {
     use super::*;
 
-    use crate::{config::SecretConfig, Result};
+    use crate::{secret_config::SecretConfig, Result};
 
     // A helper function to instantiate a new connection manager for each test.
     //
@@ -272,7 +272,7 @@ mod test {
         let connection_manager = instantiate_new_connection_manager();
 
         // Create a unique keypair to sign messages.
-        let keypair = SecretConfig::create().owned_identity().unwrap();
+        let keypair = SecretConfig::create().to_owned_identity().unwrap();
 
         // Insert a new connected peer.
         let insert_result = connection_manager

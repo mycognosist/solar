@@ -307,7 +307,7 @@ mod test {
     use serde_json::json;
     use sled::Config as KvConfig;
 
-    use crate::config::SecretConfig;
+    use crate::secret_config::SecretConfig;
 
     fn open_temporary_kv() -> KvStorage {
         let mut kv = KvStorage::default();
@@ -322,7 +322,7 @@ mod test {
     async fn test_feed_length() -> Result<()> {
         use kuska_ssb::feed::Message;
         // Create a unique keypair to sign messages.
-        let keypair = SecretConfig::create().owned_identity().unwrap();
+        let keypair = SecretConfig::create().to_owned_identity().unwrap();
 
         // Open a temporary key-value store.
         let kv = open_temporary_kv();
@@ -354,7 +354,7 @@ mod test {
     #[async_std::test]
     async fn test_single_message_content_matches() -> Result<()> {
         // Create a unique keypair to sign messages.
-        let keypair = SecretConfig::create().owned_identity().unwrap();
+        let keypair = SecretConfig::create().to_owned_identity().unwrap();
 
         // Open a temporary key-value store.
         let kv = open_temporary_kv();
@@ -390,7 +390,7 @@ mod test {
     #[async_std::test]
     async fn test_new_feed_is_empty() -> Result<()> {
         // Create a unique keypair to sign messages.
-        let keypair = SecretConfig::create().owned_identity().unwrap();
+        let keypair = SecretConfig::create().to_owned_identity().unwrap();
 
         // Open a temporary key-value store.
         let kv = open_temporary_kv();
@@ -413,7 +413,7 @@ mod test {
     #[async_std::test]
     async fn test_append_feed() -> Result<()> {
         // Create a unique keypair to sign messages.
-        let keypair = SecretConfig::create().owned_identity().unwrap();
+        let keypair = SecretConfig::create().to_owned_identity().unwrap();
 
         // Open a temporary key-value store.
         let kv = open_temporary_kv();

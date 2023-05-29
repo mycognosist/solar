@@ -146,6 +146,8 @@ impl ConnectionManager {
     ///
     /// Listen for connection event messages via the broker and update
     /// connection state accordingly.
+    // TODO: consider renaming this `start()` in accordance with the connection
+    // scheduler.
     pub async fn msg_loop() {
         // Register the connection manager actor with the broker.
         let ActorEndpoint {

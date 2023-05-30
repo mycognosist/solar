@@ -206,7 +206,7 @@ impl TryFrom<Cli> for ApplicationConfig {
                 let public_key_without_suffix = public_key.to_ed25519_pk_no_suffix()?;
 
                 // Push the peer connection details to the vector.
-                peer_connections.push((addr, public_key_without_suffix));
+                peer_connections.push((public_key_without_suffix, addr));
             }
         }
 

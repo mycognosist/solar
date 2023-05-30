@@ -5,9 +5,9 @@ use kuska_ssb::{crypto::ed25519::PublicKey, discovery};
 
 #[derive(Debug, Clone)]
 pub struct NetworkConfig {
-    /// Peer(s) to connect to over TCP. Each entry includes an address
-    /// (IP / hostname and port) and the corresponding public key.
-    pub connect: Vec<(String, PublicKey)>,
+    /// Peer(s) to connect to over TCP. Each entry includes a public key and
+    /// the corresponding address (IP / hostname and port).
+    pub connect: Vec<(PublicKey, String)>,
 
     /// Secret handshake HMAC key (aka. network key, caps key, SHS key).
     pub key: NetworkKey,

@@ -3,7 +3,7 @@ use std::net::Shutdown;
 use async_std::net::TcpStream;
 use futures::SinkExt;
 use kuska_ssb::{
-    crypto::ToSsbId,
+    crypto::{ToSodiumObject, ToSsbId},
     handshake::async_std::{handshake_client, handshake_server},
     keystore::OwnedIdentity,
 };
@@ -191,7 +191,7 @@ pub async fn actor_inner(
                 & !PEERS_TO_REPLICATE
                     .get()
                     .unwrap()
-                    .contains_key(&peer_public_key)
+                    .contains_key(&peer_public_key.to_ed25519_pk().unwrap())
             {
                 info!(
                     "peer {} is not in replication list and selective replication is enabled; dropping connection",
@@ -221,6 +221,9 @@ pub async fn actor_inner(
     // Parse the peer public key from the handshake.
     let peer_public_key = handshake.peer_pk;
 
+    // TODO: consider moving this into the connection manager.
+    // That will allow us to centralise all transformations to the list.
+    //
     // Add the peer to the list of connected peers.
     CONNECTION_MANAGER
         .write()

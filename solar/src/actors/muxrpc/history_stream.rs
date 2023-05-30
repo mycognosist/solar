@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use futures::SinkExt;
 use kuska_ssb::{
     api::{dto, ApiCaller, ApiMethod},
+    crypto::ToSsbId,
     feed::{Feed as MessageKvt, Message},
     rpc,
 };
@@ -147,11 +148,13 @@ where
                 // Instantiate the history stream request args for the given peer.
                 // The `live` arg means: keep the connection open after initial
                 // replication.
-                let mut args = dto::CreateHistoryStreamIn::new(peer_pk.to_string()).live(true);
+                let mut args = dto::CreateHistoryStreamIn::new(peer_pk.to_ssb_id()).live(true);
 
                 // Retrieve the sequence number of the most recent message for
                 // this peer from the local key-value store.
-                if let Some(last_seq) = KV_STORE.read().await.get_latest_seq(peer_pk)? {
+                if let Some(last_seq) =
+                    KV_STORE.read().await.get_latest_seq(&peer_pk.to_ssb_id())?
+                {
                     // Use the latest sequence number to update the request args.
                     args = args.after_seq(last_seq);
                 }
@@ -161,11 +164,12 @@ where
 
                 // Insert the history stream request ID and peer ID
                 // (public key) into the peers hash map.
-                self.peers.insert(id, peer_pk.to_string());
+                self.peers.insert(id, peer_pk.to_ssb_id());
 
                 info!(
                     "requesting messages authored by peer {} after {:?}",
-                    peer_pk, args.seq
+                    peer_pk.to_ssb_id(),
+                    args.seq
                 );
             }
 

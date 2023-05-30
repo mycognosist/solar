@@ -2,15 +2,14 @@ use std::net::SocketAddr;
 
 use async_std::sync::{Arc, RwLock};
 use futures::SinkExt;
-use kuska_ssb::crypto::{ed25519::PublicKey, ToSodiumObject};
+use kuska_ssb::crypto::ed25519::PublicKey;
 use once_cell::sync::Lazy;
 
 use crate::{
     actors::{
         jsonrpc,
         network::{
-            connection_manager, connection_manager::CONNECTION_MANAGER, connection_scheduler,
-            lan_discovery, secret_handshake, tcp_server,
+            connection_manager::CONNECTION_MANAGER, connection_scheduler, lan_discovery, tcp_server,
         },
     },
     broker::*,

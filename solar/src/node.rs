@@ -2,14 +2,15 @@ use std::net::SocketAddr;
 
 use async_std::sync::{Arc, RwLock};
 use futures::SinkExt;
+use kuska_ssb::crypto::{ed25519::PublicKey, ToSodiumObject};
 use once_cell::sync::Lazy;
 
 use crate::{
     actors::{
         jsonrpc,
         network::{
-            connection_manager, connection_manager::CONNECTION_MANAGER, lan_discovery,
-            secret_handshake, tcp_server,
+            connection_manager, connection_manager::CONNECTION_MANAGER, connection_scheduler,
+            lan_discovery, secret_handshake, tcp_server,
         },
     },
     broker::*,
@@ -102,9 +103,28 @@ impl Node {
             ));
         }
 
+        // Convert the HashMap of peers to be replicated into a Vec.
+        let mut peers_to_dial: Vec<(PublicKey, String)> = config
+            .replication
+            .peers
+            .into_iter()
+            .map(|(public_key, url)| (public_key, url))
+            .collect();
+
+        // Add any connection details supplied via the `--connect` CLI option.
+        peers_to_dial.extend(config.network.connect);
+
+        // Spawn the connection scheduler actor. Dials remote peers on an
+        // ongoing basis (at `eager` or `lazy` intervals).
+        Broker::spawn(connection_scheduler::actor(
+            peers_to_dial,
+            config.replication.selective,
+        ));
+
+        /*
         // Spawn the secret handshake actor for each set of provided connection
         // parameters. This results in an outbound connection attempt.
-        for (addr, peer_public_key) in config.network.connect {
+        for (peer_public_key, addr) in config.network.connect {
             Broker::spawn(secret_handshake::actor(
                 config.secret.to_owned_identity()?,
                 connection_manager::TcpConnection::Dial {
@@ -114,6 +134,7 @@ impl Node {
                 config.replication.selective,
             ));
         }
+        */
 
         // Spawn the connection manager message loop.
         let connection_manager_msgloop = CONNECTION_MANAGER.write().await.take_msgloop();

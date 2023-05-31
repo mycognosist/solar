@@ -1,5 +1,6 @@
 use std::{fmt, io, net};
 
+use futures::channel::mpsc;
 use jsonrpsee::types::error::ErrorObjectOwned as JsonRpcErrorOwned;
 use jsonrpsee::types::error::SERVER_ERROR_MSG;
 use kuska_ssb::{api, crypto, discovery, feed, handshake, rpc};
@@ -18,6 +19,8 @@ pub enum Error {
     Database(sled::Error),
     /// Failed to deserialization TOML.
     DeserializeToml(de::Error),
+    /// Failed to send message on futures channel.
+    FuturesChannel(mpsc::SendError),
     /// Validation error; invalid message sequence number.
     InvalidSequence,
     /// io::Error.
@@ -56,6 +59,9 @@ impl fmt::Display for Error {
             Error::Crypto(err) => write!(f, "ssb cryptographic error: {err}"),
             Error::Database(err) => write!(f, "key-value database error: {err}"),
             Error::DeserializeToml(err) => write!(f, "failed to deserialize toml: {err}"),
+            Error::FuturesChannel(err) => {
+                write!(f, "failed to send message on futures channel: {err}")
+            }
             // TODO: Attach context so we know the identity of the offending message.
             Error::InvalidSequence => write!(
                 f,
@@ -104,6 +110,12 @@ impl From<sled::Error> for Error {
 impl From<de::Error> for Error {
     fn from(err: de::Error) -> Error {
         Error::DeserializeToml(err)
+    }
+}
+
+impl From<mpsc::SendError> for Error {
+    fn from(err: mpsc::SendError) -> Error {
+        Error::FuturesChannel(err)
     }
 }
 

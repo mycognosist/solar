@@ -46,13 +46,13 @@ Peers can be manually added to the replication configuration:
 # Peer data takes the form of key-value pairs.
 # The key is the public key of a peer.
 # The value is a URL specifying the connection address of the peer.
-# The URL takes the form: <scheme>://<host>:<port>?shs=<public key>.
+# The URL takes the form: <scheme>://<host>:<port>.
 # The value must be an empty string if the URL is unknown.
 "@o8lWpyLeSqV/BJV9pbxFhKpwm6Lw5k+sqexYK+zT9Tc=.ed25519" = "tcp://[200:9730:17c:7f5b:c7c6:c999:7b2a:c958]:8008"
 "@HEqy940T6uB+T+d9Jaa58aNfRzLx9eRWqkZljBmnkmk=.ed25519" = ""
 ```
 
-Alternatively, peers can be added to the replication configuration via CLI options:
+Alternatively, peers can be added to the replication configuration via CLI options (note the inclusion of the `shs` query parameter containing the public key of the remote peer):
 
 `solar --connect "tcp://[200:df93:fed8:e5ff:5c43:eab7:6c74:9d94]:8010?shs=MDErHCTxklXc7QZ43fnyzERbRJ7fccRfCYF11EqIFEI=" --replicate connect`
 

@@ -1,8 +1,8 @@
 //! Connection Scheduler
 //!
-//! Takes a list of peers to connect to (including the SSB public key and an address for each)
-//! and places all of them into an "eager" queue. Each peer is dialed, one by one, with a delay
-//! of x seconds between each dial attempt.
+//! The scheduler takes a list of peers to connect to (including the SSB public key and an address
+//! for each) and places all of them into an "eager" queue. Each peer is dialed, one by one, with
+//! a delay of x seconds between each dial attempt.
 //!
 //! If the connection and handshake are successful, the peer is pushed to the back of the "eager"
 //! queue once the connection is complete.
@@ -63,11 +63,10 @@ impl ConnectionScheduler {
     /// Create a new connection scheduler and populate it with a list of peers
     /// to dial.
     fn new(peers: Vec<(PublicKey, String)>) -> Self {
-        let mut scheduler = ConnectionScheduler::default();
-
-        scheduler.eager_peers = VecDeque::from(peers);
-
-        scheduler
+        ConnectionScheduler {
+            eager_peers: VecDeque::from(peers),
+            ..Default::default()
+        }
     }
 }
 
@@ -89,13 +88,11 @@ pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool)
         .lock()
         .await
         .register("connection-scheduler", true)
-        .await
-        .unwrap();
+        .await?;
 
     // Create a new connection scheduler and populate it with a list of peers
     // to dial.
-    let mut scheduler = ConnectionScheduler::default();
-    scheduler.eager_peers = VecDeque::from(peers);
+    let mut scheduler = ConnectionScheduler::new(peers);
 
     // Create the tickers (aka. metronomes) which will emit messages at
     // the predetermined interval. These tickers control the rates at which
@@ -170,27 +167,43 @@ pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool)
                 if let Some(msg) = msg {
                     if let Some(conn_event) = msg.downcast_ref::<ConnectionEvent>() {
                         match conn_event {
-                            ConnectionEvent::Connected(id) => {
-                                todo!()
+                            ConnectionEvent::Replicating(data) => {
+                                // This connection was "successful".
+                                // Push the peer to the back of the eager queue.
+                                if let Some(public_key) = data.peer_public_key {
+                                    if let Some(addr) = &data.peer_addr {
+                                        // Only push if the peer is not already in the queue.
+                                        if !scheduler.eager_peers.contains(&(public_key, addr.to_string())) {
+                                            scheduler.eager_peers.push_back((public_key, addr.to_owned()))
+                                        }
+                                    }
+                                }
                             }
-                            ConnectionEvent::Replicating(id) => {
-                                // Push peer to the back of the eager queue.
-                                //scheduler.eager_peers.push_back((peer_public_key, addr))
-                                todo!()
+                            ConnectionEvent::Disconnected(data) => {
+                                // This connection may or may not have been "successful".
+                                // If it was successful (ie. replication took place) then
+                                // the peer should have already been pushed back to the eager
+                                // queue. If not, push the peer to the back of the lazy queue.
+                                if let Some(public_key) = data.peer_public_key {
+                                    if let Some(addr) = &data.peer_addr {
+                                        // Only push if the peer is not in the eager queue.
+                                        if !scheduler.eager_peers.contains(&(public_key, addr.to_string())) {
+                                            scheduler.lazy_peers.push_back((public_key, addr.to_owned()))
+                                        }
+                                    }
+                                }
                             }
-                            ConnectionEvent::Disconnected(id) => {
-                                // TODO: how do we know if replication was unsuccessful?
-                                // In other words, how do we prevent the case
-                                // where we push a peer to both queues erroneously?
-                                // One way: check if the eager queue contains this peer.
-                                // If not, push them to the lazy queue.
-                                // This should work because the `Replicating` event will
-                                // occur before `Disconnected`.
-                                todo!()
-                            }
-                            ConnectionEvent::Error(id, err) => {
-                                // Push peer to the back of the lazy queue.
-                                todo!()
+                            ConnectionEvent::Error(data, _err) => {
+                                // This connection was "unsuccessful".
+                                // Push the peer to the back of the lazy queue.
+                                if let Some(public_key) = data.peer_public_key {
+                                    if let Some(addr) = &data.peer_addr {
+                                        // Only push if the peer is not already in the queue.
+                                        if !scheduler.lazy_peers.contains(&(public_key, addr.to_string())) {
+                                            scheduler.lazy_peers.push_back((public_key, addr.to_owned()))
+                                        }
+                                    }
+                                }
                             }
                             // Ignore all other connection event variants.
                             _ => (),

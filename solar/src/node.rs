@@ -120,21 +120,6 @@ impl Node {
             config.replication.selective,
         ));
 
-        /*
-        // Spawn the secret handshake actor for each set of provided connection
-        // parameters. This results in an outbound connection attempt.
-        for (peer_public_key, addr) in config.network.connect {
-            Broker::spawn(secret_handshake::actor(
-                config.secret.to_owned_identity()?,
-                connection_manager::TcpConnection::Dial {
-                    addr,
-                    peer_public_key,
-                },
-                config.replication.selective,
-            ));
-        }
-        */
-
         // Spawn the connection manager message loop.
         let connection_manager_msgloop = CONNECTION_MANAGER.write().await.take_msgloop();
         connection_manager_msgloop.await;

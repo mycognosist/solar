@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt::Display};
 
 use async_std::{
     net::TcpStream,
@@ -7,44 +7,20 @@ use async_std::{
     task::JoinHandle,
 };
 use futures::{select_biased, stream::StreamExt, FutureExt};
-use kuska_ssb::crypto::ed25519;
+use kuska_ssb::crypto::{ed25519, ToSsbId};
 use log::trace;
 use once_cell::sync::Lazy;
 
 use crate::broker::{ActorEndpoint, BROKER};
 
-/*
-/// All possible errors while negotiating connections.
-pub enum ConnectionError {
-    Io(std::io::Error),
-    Handshake,
-}
-
-/// Peer connection data.
-pub struct Connection {
-    /// Peer data.
-    peer: PeerData,
-
-    /// Connection state.
-    state: ConnectionState,
-
-    /// Connection identifier.
-    id: usize,
-}
-
-impl Connection {
-    pub fn new() {
-    }
-}
-*/
+/// The connection manager for the solar node.
+pub static CONNECTION_MANAGER: Lazy<Arc<RwLock<ConnectionManager>>> =
+    Lazy::new(|| Arc::new(RwLock::new(ConnectionManager::new())));
 
 /// Encapsulate inbound and outbound TCP connections.
 pub enum TcpConnection {
     /// An outbound TCP connection.
     Dial {
-        // TODO: addr: SocketAddr (instead of server and port)
-        //server: String,
-        //port: u16,
         /// The address of a remote peer.
         addr: String,
         /// The public key of a remote peer.
@@ -54,17 +30,70 @@ pub enum TcpConnection {
     Listen { stream: TcpStream },
 }
 
-/// Connection events. The `usize` represents the connection ID.
+/// Connection data.
+#[derive(Debug, Clone)]
+pub struct ConnectionData {
+    /// Connection identifier.
+    pub id: usize,
+    /// The address of the remote peer.
+    pub peer_addr: Option<String>,
+    /// The public key of the remote peer.
+    pub peer_public_key: Option<ed25519::PublicKey>,
+}
+
+// Custom `Display` implementation so we can easily log connection data in
+// the message loop.
+impl Display for ConnectionData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let peer_addr = match &self.peer_addr {
+            Some(addr) => addr.to_string(),
+            None => "-".to_string(),
+        };
+
+        let peer_public_key = match &self.peer_public_key {
+            Some(key) => {
+                let ssb_id = key.to_ssb_id();
+                if ssb_id.starts_with('@') {
+                    ssb_id
+                } else {
+                    format!("@{}", ssb_id)
+                }
+            }
+            None => "-".to_string(),
+        };
+
+        write!(
+            f,
+            "<ConnectionData {} / {} / {}>",
+            &self.id, peer_public_key, peer_addr
+        )
+    }
+}
+
+impl ConnectionData {
+    pub fn new(
+        id: usize,
+        peer_addr: Option<String>,
+        peer_public_key: Option<ed25519::PublicKey>,
+    ) -> Self {
+        ConnectionData {
+            id,
+            peer_addr,
+            peer_public_key,
+        }
+    }
+}
+
+/// Connection events with associated connection data.
 #[derive(Debug)]
 pub enum ConnectionEvent {
-    Connecting(usize),
-    Handshaking(usize),
-    Connected(usize),
-    Replicating(usize),
-    Disconnecting(usize),
-    Disconnected(usize),
-    // TODO: use `ConnectionError` instead of `String`.
-    Error(usize, String),
+    Connecting(ConnectionData),
+    Handshaking(ConnectionData),
+    Connected(ConnectionData),
+    Replicating(ConnectionData),
+    Disconnecting(ConnectionData),
+    Disconnected(ConnectionData),
+    Error(ConnectionData, String),
 }
 
 /// Connection manager (broker).
@@ -82,10 +111,6 @@ pub struct ConnectionManager {
     // Then we can query total active connections using `.len()`.
     //active_connections: HashSet<usize>,
 }
-
-/// The connection manager for the solar node.
-pub static CONNECTION_MANAGER: Lazy<Arc<RwLock<ConnectionManager>>> =
-    Lazy::new(|| Arc::new(RwLock::new(ConnectionManager::new())));
 
 impl ConnectionManager {
     /// Instantiate a new `ConnectionManager`.
@@ -137,7 +162,7 @@ impl ConnectionManager {
         // Increment the last connection ID value.
         self.last_connection_id += 1;
 
-        trace!(target: "connection-manager", "registered new connection: {}", self.last_connection_id);
+        trace!(target: "connection-manager", "Registered new connection: {}", self.last_connection_id);
 
         self.last_connection_id
     }
@@ -146,8 +171,6 @@ impl ConnectionManager {
     ///
     /// Listen for connection event messages via the broker and update
     /// connection state accordingly.
-    // TODO: consider renaming this `start()` in accordance with the connection
-    // scheduler.
     pub async fn msg_loop() {
         // Register the connection manager actor with the broker.
         let ActorEndpoint {
@@ -180,26 +203,26 @@ impl ConnectionManager {
                     if let Some(msg) = msg {
                         if let Some(conn_event) = msg.downcast_ref::<ConnectionEvent>() {
                             match conn_event {
-                                ConnectionEvent::Connecting(id) => {
-                                    trace!(target: "connection-manager", "connecting: {}", id);
+                                ConnectionEvent::Connecting(data) => {
+                                    trace!(target: "connection-manager", "Connecting: {data}");
                                 }
-                                ConnectionEvent::Handshaking(id) => {
-                                    trace!(target: "connection-manager", "handshaking: {}", id);
+                                ConnectionEvent::Handshaking(data) => {
+                                    trace!(target: "connection-manager", "Handshaking: {data}");
                                 }
-                                ConnectionEvent::Connected(id) => {
-                                    trace!(target: "connection-manager", "connected: {}", id);
+                                ConnectionEvent::Connected(data) => {
+                                    trace!(target: "connection-manager", "Connected: {data}");
                                 }
-                                ConnectionEvent::Replicating(id) => {
-                                    trace!(target: "connection-manager", "replicating: {}", id);
+                                ConnectionEvent::Replicating(data) => {
+                                    trace!(target: "connection-manager", "Replicating: {data}");
                                 }
-                                ConnectionEvent::Disconnecting(id) => {
-                                    trace!(target: "connection-manager", "disconnecting: {}", id);
+                                ConnectionEvent::Disconnecting(data) => {
+                                    trace!(target: "connection-manager", "Disconnecting: {data}");
                                 }
-                                ConnectionEvent::Disconnected(id) => {
-                                    trace!(target: "connection-manager", "disconnected: {}", id);
+                                ConnectionEvent::Disconnected(data) => {
+                                    trace!(target: "connection-manager", "Disconnected: {data}");
                                 }
-                                ConnectionEvent::Error(id, err) => {
-                                    trace!(target: "connection-manager", "error: {}: {}", id, err);
+                                ConnectionEvent::Error(data, err) => {
+                                    trace!(target: "connection-manager", "Error: {data}: {err}");
                                 }
                             }
                         }

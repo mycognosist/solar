@@ -19,14 +19,14 @@ use crate::{
             BlobsGetHandler, BlobsWantsHandler, GetHandler, HistoryStreamHandler, RpcHandler,
             RpcInput, WhoAmIHandler,
         },
-        network::connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
+        network::connection_manager::{ConnectionData, ConnectionEvent, CONNECTION_MANAGER},
     },
     broker::*,
     Result,
 };
 
 pub async fn actor<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync>(
-    connection_id: usize,
+    connection_data: ConnectionData,
     stream_reader: R,
     stream_writer: W,
     handshake: HandshakeComplete,
@@ -34,7 +34,7 @@ pub async fn actor<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
 ) -> Result<()> {
     // Catch any errors which occur during replication.
     if let Err(err) = actor_inner(
-        connection_id,
+        connection_data.to_owned(),
         stream_reader,
         stream_writer,
         handshake,
@@ -50,10 +50,9 @@ pub async fn actor<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
         ch_broker
             .send(BrokerEvent::new(
                 Destination::Broadcast,
-                ConnectionEvent::Error(connection_id, err.to_string()),
+                ConnectionEvent::Error(connection_data, err.to_string()),
             ))
-            .await
-            .unwrap();
+            .await?;
     }
 
     Ok(())
@@ -61,12 +60,12 @@ pub async fn actor<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
 
 /// Spawn the replication loop and report on the connection outcome.
 pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync>(
-    connection_id: usize,
+    connection_data: ConnectionData,
     mut stream_reader: R,
     mut stream_writer: W,
     handshake: HandshakeComplete,
     peer_pk: ed25519::PublicKey,
-) -> Result<usize> {
+) -> Result<ConnectionData> {
     // Register the "replication" actor endpoint with the broker.
     let ActorEndpoint {
         ch_terminate,
@@ -80,10 +79,9 @@ pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send 
     ch_broker
         .send(BrokerEvent::new(
             Destination::Broadcast,
-            ConnectionEvent::Replicating(connection_id),
+            ConnectionEvent::Replicating(connection_data.to_owned()),
         ))
-        .await
-        .unwrap();
+        .await?;
 
     // Set the connection idle timeout limit according to the connection
     // manager configuration. This value is used to break out of the
@@ -102,6 +100,7 @@ pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send 
     )
     .await;
 
+    // TODO: consider moving this to the connection manager.
     // Remove the peer from the list of connected peers.
     CONNECTION_MANAGER
         .write()
@@ -111,16 +110,13 @@ pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send 
     if let Err(err) = res {
         warn!("💀 client terminated with error {:?}", err);
 
-        // TODO: Use the `ConnectionError` as the type for `err`.
-        //
         // Send 'error' connection event message via the broker.
         ch_broker
             .send(BrokerEvent::new(
                 Destination::Broadcast,
-                ConnectionEvent::Error(connection_id, err.to_string()),
+                ConnectionEvent::Error(connection_data.to_owned(), err.to_string()),
             ))
-            .await
-            .unwrap();
+            .await?;
     } else {
         info!("👋 finished connection with {}", &peer_pk.to_ssb_id());
 
@@ -128,15 +124,14 @@ pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send 
         ch_broker
             .send(BrokerEvent::new(
                 Destination::Broadcast,
-                ConnectionEvent::Disconnected(connection_id),
+                ConnectionEvent::Disconnected(connection_data.to_owned()),
             ))
-            .await
-            .unwrap();
+            .await?;
     }
 
     let _ = ch_broker.send(BrokerEvent::Disconnect { actor_id }).await;
 
-    Ok(connection_id)
+    Ok(connection_data)
 }
 
 async fn replication_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync>(

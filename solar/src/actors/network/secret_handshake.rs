@@ -3,14 +3,16 @@ use std::net::Shutdown;
 use async_std::net::TcpStream;
 use futures::SinkExt;
 use kuska_ssb::{
-    crypto::{ToSodiumObject, ToSsbId},
+    crypto::ToSsbId,
     handshake::async_std::{handshake_client, handshake_server},
     keystore::OwnedIdentity,
 };
 use log::{info, warn};
 
 use crate::{
-    actors::network::connection_manager::{ConnectionEvent, TcpConnection, CONNECTION_MANAGER},
+    actors::network::connection_manager::{
+        ConnectionData, ConnectionEvent, TcpConnection, CONNECTION_MANAGER,
+    },
     broker::*,
     config::{NETWORK_KEY, PEERS_TO_REPLICATE},
     Result,
@@ -24,21 +26,33 @@ pub async fn actor(
     // Register a new connection with the connection manager.
     let connection_id = CONNECTION_MANAGER.write().await.register();
 
-    // Catch any errors which occur during the peer connection and replication.
-    if let Err(err) = actor_inner(identity, connection, connection_id, selective_replication).await
+    // Record the data associated with this connection.
+    let connection_data = ConnectionData::new(connection_id, None, None);
+
+    let mut ch_broker = BROKER.lock().await.create_sender();
+
+    // TODO: rather do:
+    // let connection_result = actor_inner(...).await;
+    // Then match on connection_result.
+    //
+    // Match on the result of the peer connection and replication attempt.
+    if let Err(err) = actor_inner(
+        identity,
+        connection,
+        connection_data.to_owned(),
+        selective_replication,
+    )
+    .await
     {
         warn!("peer failed: {:?}", err);
-
-        let mut ch_broker = BROKER.lock().await.create_sender();
 
         // Send 'error' connection event message via the broker.
         ch_broker
             .send(BrokerEvent::new(
                 Destination::Broadcast,
-                ConnectionEvent::Error(connection_id, err.to_string()),
+                ConnectionEvent::Error(connection_data, err.to_string()),
             ))
-            .await
-            .unwrap();
+            .await?;
     }
 
     Ok(())
@@ -49,9 +63,9 @@ pub async fn actor(
 pub async fn actor_inner(
     identity: OwnedIdentity,
     connection: TcpConnection,
-    connection_id: usize,
+    mut connection_data: ConnectionData,
     selective_replication: bool,
-) -> Result<usize> {
+) -> Result<ConnectionData> {
     // Register the "secret-handshake" actor endpoint with the broker.
     let ActorEndpoint { mut ch_broker, .. } = BROKER
         .lock()
@@ -65,15 +79,6 @@ pub async fn actor_inner(
     // Define the network key to be used for the secret handshake.
     let network_key = NETWORK_KEY.get().unwrap().to_owned();
 
-    // Send 'connecting' connection event message via the broker.
-    ch_broker
-        .send(BrokerEvent::new(
-            Destination::Broadcast,
-            ConnectionEvent::Connecting(connection_id),
-        ))
-        .await
-        .unwrap();
-
     // Handle a TCP connection event (inbound or outbound).
     let (stream, handshake) = match connection {
         // Handle an outbound TCP connection event.
@@ -81,18 +86,17 @@ pub async fn actor_inner(
             addr,
             peer_public_key,
         } => {
-            // TODO: move this check into the scheduler.
-            //
-            // First check if we are already connected to the selected peer.
-            // If yes, return immediately.
-            // If no, continue with the connection attempt.
-            if CONNECTION_MANAGER
-                .read()
-                .await
-                .contains_connected_peer(&peer_public_key)
-            {
-                return Ok(connection_id);
-            }
+            // Update the data associated with this connection.
+            connection_data.peer_addr = Some(addr.to_owned());
+            connection_data.peer_public_key = Some(peer_public_key);
+
+            // Send 'connecting' connection event message via the broker.
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    ConnectionEvent::Connecting(connection_data.to_owned()),
+                ))
+                .await?;
 
             // Attempt a TCP connection.
             let mut stream = TcpStream::connect(addr).await?;
@@ -101,10 +105,9 @@ pub async fn actor_inner(
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Handshaking(connection_id),
+                    ConnectionEvent::Handshaking(connection_data.to_owned()),
                 ))
-                .await
-                .unwrap();
+                .await?;
 
             // Attempt a secret handshake.
             let handshake =
@@ -117,35 +120,40 @@ pub async fn actor_inner(
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Connected(connection_id),
+                    ConnectionEvent::Connected(connection_data.to_owned()),
                 ))
-                .await
-                .unwrap();
+                .await?;
 
             (stream, handshake)
         }
         // Handle an incoming TCP connection event.
         TcpConnection::Listen { mut stream } => {
+            // Retrieve the origin (address) of the incoming connection.
+            let peer_addr = stream.peer_addr()?.to_string();
+
+            //let mut connection_data = ConnectionData::new(connection_id, Some(peer_addr), None);
+            // Update the data associated with this connection.
+            connection_data.peer_addr = Some(peer_addr);
+            connection_data.peer_public_key = None;
+
+            // Send 'connecting' connection event message via the broker.
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    ConnectionEvent::Connecting(connection_data.to_owned()),
+                ))
+                .await?;
+
             // Send 'handshaking' connection event message via the broker.
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Handshaking(connection_id),
+                    ConnectionEvent::Handshaking(connection_data.to_owned()),
                 ))
-                .await
-                .unwrap();
+                .await?;
 
             // Attempt a secret handshake.
             let handshake = handshake_server(&mut stream, network_key.to_owned(), pk, sk).await?;
-
-            // Send 'connected' connection event message via the broker.
-            ch_broker
-                .send(BrokerEvent::new(
-                    Destination::Broadcast,
-                    ConnectionEvent::Connected(connection_id),
-                ))
-                .await
-                .unwrap();
 
             // Convert the public key to a `String`.
             let ssb_id = handshake.peer_pk.to_ssb_id();
@@ -156,6 +164,18 @@ pub async fn actor_inner(
             } else {
                 format!("@{ssb_id}")
             };
+
+            // Update the connection data to include the public key of the
+            // remote peer (sourced from the successful handshake data).
+            connection_data.peer_public_key = Some(handshake.peer_pk.to_owned());
+
+            // Send 'connected' connection event message via the broker.
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    ConnectionEvent::Connected(connection_data.to_owned()),
+                ))
+                .await?;
 
             // Check if we are already connected to the selected peer.
             // If yes, return immediately.
@@ -174,12 +194,11 @@ pub async fn actor_inner(
                 ch_broker
                     .send(BrokerEvent::new(
                         Destination::Broadcast,
-                        ConnectionEvent::Disconnecting(connection_id),
+                        ConnectionEvent::Disconnecting(connection_data.to_owned()),
                     ))
-                    .await
-                    .unwrap();
+                    .await?;
 
-                return Ok(connection_id);
+                return Ok(connection_data);
             }
 
             info!("💃 received connection from peer {}", &peer_public_key);
@@ -191,7 +210,7 @@ pub async fn actor_inner(
                 & !PEERS_TO_REPLICATE
                     .get()
                     .unwrap()
-                    .contains_key(&peer_public_key.to_ed25519_pk().unwrap())
+                    .contains_key(&handshake.peer_pk)
             {
                 info!(
                     "peer {} is not in replication list and selective replication is enabled; dropping connection",
@@ -202,16 +221,15 @@ pub async fn actor_inner(
                 ch_broker
                     .send(BrokerEvent::new(
                         Destination::Broadcast,
-                        ConnectionEvent::Disconnecting(connection_id),
+                        ConnectionEvent::Disconnecting(connection_data.to_owned()),
                     ))
-                    .await
-                    .unwrap();
+                    .await?;
 
                 // This may not be necessary; the connection should close when
                 // the stream is dropped.
                 stream.shutdown(Shutdown::Both)?;
 
-                return Ok(connection_id);
+                return Ok(connection_data);
             }
 
             (stream, handshake)
@@ -230,14 +248,14 @@ pub async fn actor_inner(
         .await
         .insert_connected_peer(peer_public_key);
 
-    // Spawn the classic replication actor.
+    // Spawn the classic replication actor and await the result.
     Broker::spawn(crate::actors::replication::classic::actor(
-        connection_id,
+        connection_data.to_owned(),
         stream.clone(),
         stream,
         handshake,
         peer_public_key,
     ));
 
-    Ok(connection_id)
+    Ok(connection_data)
 }

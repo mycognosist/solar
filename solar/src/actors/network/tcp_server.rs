@@ -6,14 +6,18 @@ use futures::{select_biased, FutureExt};
 use kuska_ssb::keystore::OwnedIdentity;
 use log::debug;
 
-use crate::{broker::*, Result};
+use crate::{
+    actors::network::{connection, connection::TcpConnection},
+    broker::*,
+    Result,
+};
 
 pub async fn actor(
     server_id: OwnedIdentity,
     addr: impl ToSocketAddrs,
     selective_replication: bool,
 ) -> Result<()> {
-    let broker = BROKER.lock().await.register("sbot-listener", false).await?;
+    let broker = BROKER.lock().await.register("tcp-server", false).await?;
 
     let mut ch_terminate = broker.ch_terminate.fuse();
 
@@ -29,9 +33,9 @@ pub async fn actor(
                     if let Ok(stream) = stream {
                         debug!("Received inbound TCP connection");
                         Broker::spawn(
-                            super::secret_handshake::actor(
+                            connection::actor(
                                 server_id.clone(),
-                                super::connection_manager::TcpConnection::Listen{ stream },
+                                TcpConnection::Listen { stream },
                                 selective_replication
                             )
                         );

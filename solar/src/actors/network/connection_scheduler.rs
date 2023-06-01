@@ -23,9 +23,9 @@ use kuska_ssb::crypto::ed25519::PublicKey;
 
 use crate::{
     actors::network::{
-        connection_manager,
+        connection,
+        connection::TcpConnection,
         connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
-        secret_handshake,
     },
     broker::{ActorEndpoint, Broker, BROKER},
     config::SECRET_CONFIG,
@@ -126,10 +126,10 @@ pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool)
                             scheduler.eager_peers.push_back((peer_public_key, addr))
                         } else {
                             // Otherwise, dial the peer.
-                            Broker::spawn(secret_handshake::actor(
+                            Broker::spawn(connection::actor(
                                 // TODO: make this neater once config-sharing story has improved.
                                 SECRET_CONFIG.get().unwrap().to_owned_identity()?,
-                                connection_manager::TcpConnection::Dial {
+                                TcpConnection::Dial {
                                     addr,
                                     peer_public_key,
                                 },
@@ -150,9 +150,9 @@ pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool)
                             scheduler.eager_peers.push_back((peer_public_key, addr))
                         } else {
                             // Otherwise, dial the peer.
-                            Broker::spawn(secret_handshake::actor(
+                            Broker::spawn(connection::actor(
                                 SECRET_CONFIG.get().unwrap().to_owned_identity()?,
-                                connection_manager::TcpConnection::Dial {
+                                TcpConnection::Dial {
                                     addr,
                                     peer_public_key,
                                 },

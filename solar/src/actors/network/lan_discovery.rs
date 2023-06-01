@@ -7,7 +7,11 @@ use futures::{select_biased, FutureExt};
 use kuska_ssb::{discovery::LanBroadcast, keystore::OwnedIdentity};
 use log::warn;
 
-use crate::{broker::*, Result};
+use crate::{
+    actors::network::{connection, connection::TcpConnection},
+    broker::*,
+    Result,
+};
 
 /// Register the LAN discovery endpoint, send and receive UDP broadcasts and
 /// spawn a secret handshake actor for each successfully parsed broadcast message.
@@ -87,10 +91,10 @@ async fn process_broadcast(
     if let Some((server, port, peer_public_key)) = LanBroadcast::parse(&msg) {
         let addr = format!("{server}:{port}");
 
-        // Spawn a secret handshake actor with the given connection parameters.
-        Broker::spawn(super::secret_handshake::actor(
+        // Spawn a connection actor with the given connection parameters.
+        Broker::spawn(connection::actor(
             server_id.clone(),
-            super::connection_manager::TcpConnection::Dial {
+            TcpConnection::Dial {
                 addr,
                 peer_public_key,
             },

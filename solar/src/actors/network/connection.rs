@@ -1,22 +1,87 @@
-use std::net::Shutdown;
+use std::{fmt::Display, net::Shutdown};
 
 use async_std::net::TcpStream;
 use futures::SinkExt;
 use kuska_ssb::{
-    crypto::ToSsbId,
+    crypto::{ed25519, ToSsbId},
     handshake::async_std::{handshake_client, handshake_server},
     keystore::OwnedIdentity,
 };
-use log::{info, warn};
+use log::info;
 
 use crate::{
-    actors::network::connection_manager::{
-        ConnectionData, ConnectionEvent, TcpConnection, CONNECTION_MANAGER,
-    },
+    actors::network::connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
     broker::*,
     config::{NETWORK_KEY, PEERS_TO_REPLICATE},
     Result,
 };
+
+/// Encapsulate inbound and outbound TCP connections.
+pub enum TcpConnection {
+    /// An outbound TCP connection.
+    Dial {
+        /// The address of a remote peer.
+        addr: String,
+        /// The public key of a remote peer.
+        peer_public_key: ed25519::PublicKey,
+    },
+    /// An inbound TCP connection.
+    Listen { stream: TcpStream },
+}
+
+/// Connection data.
+#[derive(Debug, Clone)]
+pub struct ConnectionData {
+    /// Connection identifier.
+    pub id: usize,
+    /// The address of the remote peer.
+    pub peer_addr: Option<String>,
+    /// The public key of the remote peer.
+    pub peer_public_key: Option<ed25519::PublicKey>,
+}
+
+// Custom `Display` implementation so we can easily log connection data in
+// the message loop.
+impl Display for ConnectionData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let peer_addr = match &self.peer_addr {
+            Some(addr) => addr.to_string(),
+            None => "_".to_string(),
+        };
+
+        let peer_public_key = match &self.peer_public_key {
+            Some(key) => {
+                let ssb_id = key.to_ssb_id();
+                if ssb_id.starts_with('@') {
+                    ssb_id
+                } else {
+                    format!("@{}", ssb_id)
+                }
+            }
+            None => "_".to_string(),
+        };
+
+        write!(
+            f,
+            "<Connection {} / {} / {}>",
+            &self.id, peer_public_key, peer_addr
+        )
+    }
+}
+
+impl ConnectionData {
+    pub fn new(
+        id: usize,
+        peer_addr: Option<String>,
+        peer_public_key: Option<ed25519::PublicKey>,
+    ) -> Self {
+        ConnectionData {
+            id,
+            peer_addr,
+            peer_public_key,
+        }
+    }
+}
 
 pub async fn actor(
     identity: OwnedIdentity,
@@ -31,47 +96,51 @@ pub async fn actor(
 
     let mut ch_broker = BROKER.lock().await.create_sender();
 
-    // TODO: rather do:
-    // let connection_result = actor_inner(...).await;
-    // Then match on connection_result.
-    //
-    // Match on the result of the peer connection and replication attempt.
-    if let Err(err) = actor_inner(
+    // Attempt a connection and secret handshake.
+    let connection_result = actor_inner(
         identity,
         connection,
         connection_data.to_owned(),
         selective_replication,
     )
-    .await
-    {
-        warn!("peer failed: {:?}", err);
+    .await;
 
-        // Send 'error' connection event message via the broker.
-        ch_broker
-            .send(BrokerEvent::new(
-                Destination::Broadcast,
-                ConnectionEvent::Error(connection_data, err.to_string()),
-            ))
-            .await?;
+    // Match on the result of the peer connection and replication attempt.
+    match connection_result {
+        Err(err) => {
+            // Send 'error' connection event message via the broker.
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    ConnectionEvent::Error(connection_data, err.to_string()),
+                ))
+                .await?;
+        }
+        Ok(connection_data) => {
+            // Send 'disconnected' connection event message via the broker.
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    ConnectionEvent::Disconnected(connection_data.to_owned()),
+                ))
+                .await?;
+        }
     }
 
     Ok(())
 }
 
-/// Perform the secret handshake with a connected peer and spawn the
-/// replication actor endpoint if the handshake is successful.
+/// Handle a TCP connection with a peer, perform the secret handshake
+/// and spawn the replication actor endpoint if the handshake is successful.
 pub async fn actor_inner(
     identity: OwnedIdentity,
     connection: TcpConnection,
     mut connection_data: ConnectionData,
     selective_replication: bool,
 ) -> Result<ConnectionData> {
-    // Register the "secret-handshake" actor endpoint with the broker.
-    let ActorEndpoint { mut ch_broker, .. } = BROKER
-        .lock()
-        .await
-        .register("secret-handshake", true)
-        .await?;
+    // Register the "connection" actor endpoint with the broker.
+    let ActorEndpoint { mut ch_broker, .. } =
+        BROKER.lock().await.register("connection", true).await?;
 
     // Parse the public key and secret key from the SSB identity.
     let OwnedIdentity { pk, sk, .. } = identity;
@@ -239,15 +308,6 @@ pub async fn actor_inner(
     // Parse the peer public key from the handshake.
     let peer_public_key = handshake.peer_pk;
 
-    // TODO: consider moving this into the connection manager.
-    // That will allow us to centralise all transformations to the list.
-    //
-    // Add the peer to the list of connected peers.
-    CONNECTION_MANAGER
-        .write()
-        .await
-        .insert_connected_peer(peer_public_key);
-
     // Spawn the classic replication actor and await the result.
     Broker::spawn(crate::actors::replication::classic::actor(
         connection_data.to_owned(),
@@ -255,7 +315,8 @@ pub async fn actor_inner(
         stream,
         handshake,
         peer_public_key,
-    ));
+    ))
+    .await;
 
     Ok(connection_data)
 }

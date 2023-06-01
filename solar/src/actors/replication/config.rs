@@ -5,7 +5,6 @@ use std::{
     path::Path,
 };
 
-use kuska_ssb::crypto::ed25519::PublicKey;
 use serde::{Deserialize, Serialize};
 
 use crate::Result;
@@ -24,7 +23,7 @@ pub struct ReplicationConfig {
 
     /// List of peers to be replicated. Each entry includes a public key and
     /// a URL. The URL contains the host and port of the peer's node.
-    pub peers: HashMap<PublicKey, String>,
+    pub peers: HashMap<String, String>,
 }
 
 impl Default for ReplicationConfig {

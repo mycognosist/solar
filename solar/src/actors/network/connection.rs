@@ -279,7 +279,7 @@ pub async fn actor_inner(
                 & !PEERS_TO_REPLICATE
                     .get()
                     .unwrap()
-                    .contains_key(&handshake.peer_pk)
+                    .contains_key(&peer_public_key)
             {
                 info!(
                     "peer {} is not in replication list and selective replication is enabled; dropping connection",

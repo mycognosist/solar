@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use async_std::sync::{Arc, RwLock};
 use futures::SinkExt;
-use kuska_ssb::crypto::ed25519::PublicKey;
+use kuska_ssb::crypto::{ed25519::PublicKey, ToSodiumObject};
 use once_cell::sync::Lazy;
 
 use crate::{
@@ -107,11 +107,14 @@ impl Node {
             .replication
             .peers
             .into_iter()
-            .map(|(public_key, url)| (public_key, url))
+            // TODO: validate all public keys in `ReplicationConfig`
+            .map(|(public_key, url)| (public_key.to_ed25519_pk().unwrap(), url))
             .collect();
 
         // Add any connection details supplied via the `--connect` CLI option.
         peers_to_dial.extend(config.network.connect);
+
+        println!("Peers to dial: {:?}", peers_to_dial);
 
         // Spawn the connection scheduler actor. Dials remote peers on an
         // ongoing basis (at `eager` or `lazy` intervals).

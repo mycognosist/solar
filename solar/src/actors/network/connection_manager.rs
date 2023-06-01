@@ -1,88 +1,23 @@
-use std::{collections::HashSet, fmt::Display};
+use std::collections::HashSet;
 
 use async_std::{
-    net::TcpStream,
     sync::{Arc, RwLock},
     task,
     task::JoinHandle,
 };
 use futures::{select_biased, stream::StreamExt, FutureExt};
-use kuska_ssb::crypto::{ed25519, ToSsbId};
+use kuska_ssb::crypto::ed25519;
 use log::trace;
 use once_cell::sync::Lazy;
 
-use crate::broker::{ActorEndpoint, BROKER};
+use crate::{
+    actors::network::connection::ConnectionData,
+    broker::{ActorEndpoint, BROKER},
+};
 
 /// The connection manager for the solar node.
 pub static CONNECTION_MANAGER: Lazy<Arc<RwLock<ConnectionManager>>> =
     Lazy::new(|| Arc::new(RwLock::new(ConnectionManager::new())));
-
-/// Encapsulate inbound and outbound TCP connections.
-pub enum TcpConnection {
-    /// An outbound TCP connection.
-    Dial {
-        /// The address of a remote peer.
-        addr: String,
-        /// The public key of a remote peer.
-        peer_public_key: ed25519::PublicKey,
-    },
-    /// An inbound TCP connection.
-    Listen { stream: TcpStream },
-}
-
-/// Connection data.
-#[derive(Debug, Clone)]
-pub struct ConnectionData {
-    /// Connection identifier.
-    pub id: usize,
-    /// The address of the remote peer.
-    pub peer_addr: Option<String>,
-    /// The public key of the remote peer.
-    pub peer_public_key: Option<ed25519::PublicKey>,
-}
-
-// Custom `Display` implementation so we can easily log connection data in
-// the message loop.
-impl Display for ConnectionData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let peer_addr = match &self.peer_addr {
-            Some(addr) => addr.to_string(),
-            None => "-".to_string(),
-        };
-
-        let peer_public_key = match &self.peer_public_key {
-            Some(key) => {
-                let ssb_id = key.to_ssb_id();
-                if ssb_id.starts_with('@') {
-                    ssb_id
-                } else {
-                    format!("@{}", ssb_id)
-                }
-            }
-            None => "-".to_string(),
-        };
-
-        write!(
-            f,
-            "<ConnectionData {} / {} / {}>",
-            &self.id, peer_public_key, peer_addr
-        )
-    }
-}
-
-impl ConnectionData {
-    pub fn new(
-        id: usize,
-        peer_addr: Option<String>,
-        peer_public_key: Option<ed25519::PublicKey>,
-    ) -> Self {
-        ConnectionData {
-            id,
-            peer_addr,
-            peer_public_key,
-        }
-    }
-}
 
 /// Connection events with associated connection data.
 #[derive(Debug)]
@@ -211,6 +146,14 @@ impl ConnectionManager {
                                 }
                                 ConnectionEvent::Connected(data) => {
                                     trace!(target: "connection-manager", "Connected: {data}");
+
+                                    // Add the peer to the list of connected peers.
+                                    if let Some(public_key) = data.peer_public_key {
+                                        CONNECTION_MANAGER
+                                            .write()
+                                            .await
+                                            .insert_connected_peer(public_key);
+                                    }
                                 }
                                 ConnectionEvent::Replicating(data) => {
                                     trace!(target: "connection-manager", "Replicating: {data}");
@@ -220,9 +163,27 @@ impl ConnectionManager {
                                 }
                                 ConnectionEvent::Disconnected(data) => {
                                     trace!(target: "connection-manager", "Disconnected: {data}");
+
+                                    // Remove the peer from the list of connected peers.
+                                    if let Some(public_key) = data.peer_public_key {
+                                    CONNECTION_MANAGER
+                                        .write()
+                                        .await
+                                        .remove_connected_peer(public_key);
+
+                                    }
                                 }
                                 ConnectionEvent::Error(data, err) => {
                                     trace!(target: "connection-manager", "Error: {data}: {err}");
+
+                                    // Remove the peer from the list of connected peers.
+                                    if let Some(public_key) = data.peer_public_key {
+                                    CONNECTION_MANAGER
+                                        .write()
+                                        .await
+                                        .remove_connected_peer(public_key);
+
+                                    }
                                 }
                             }
                         }

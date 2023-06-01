@@ -32,14 +32,14 @@ impl SecretConfig {
         }
     }
 
-    /// Serialize an instance of `SecretConfig` as a TOML byte vector.
-    pub fn to_toml(&self) -> Result<Vec<u8>> {
-        Ok(toml::to_vec(&self)?)
+    /// Serialize an instance of `SecretConfig` as a TOML string.
+    pub fn to_toml(&self) -> Result<String> {
+        Ok(toml::to_string(&self)?)
     }
 
-    /// Deserialize a TOML byte slice into an instance of `SecretConfig`.
-    pub fn from_toml(s: &[u8]) -> Result<Self> {
-        Ok(toml::from_slice::<SecretConfig>(s)?)
+    /// Deserialize a TOML string slice into an instance of `SecretConfig`.
+    pub fn from_toml(serialized_config: &str) -> Result<Self> {
+        Ok(toml::from_str::<SecretConfig>(serialized_config)?)
     }
 
     /// Generate an `OwnedIdentity` from the public-private keypair.
@@ -60,15 +60,18 @@ impl SecretConfig {
         if !secret_key_file.is_file() {
             println!("Private key not found, generated new one in {secret_key_file:?}");
             let config = SecretConfig::create();
+            let toml_config = config.to_toml()?;
+
             let mut file = File::create(&secret_key_file)?;
-            file.write_all(&config.to_toml()?)?;
+            write!(file, "{}", toml_config)?;
+
             Ok(config)
         } else {
             // If the config file exists, open it and read the contents.
             let mut file = File::open(&secret_key_file)?;
-            let mut raw: Vec<u8> = Vec::new();
-            file.read_to_end(&mut raw)?;
-            SecretConfig::from_toml(&raw)
+            let mut file_contents = String::new();
+            file.read_to_string(&mut file_contents)?;
+            SecretConfig::from_toml(&file_contents)
         }
     }
 }

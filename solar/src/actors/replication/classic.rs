@@ -19,7 +19,10 @@ use crate::{
             BlobsGetHandler, BlobsWantsHandler, GetHandler, HistoryStreamHandler, RpcHandler,
             RpcInput, WhoAmIHandler,
         },
-        network::connection_manager::{ConnectionData, ConnectionEvent, CONNECTION_MANAGER},
+        network::{
+            connection::ConnectionData,
+            connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
+        },
     },
     broker::*,
     Result,
@@ -32,27 +35,44 @@ pub async fn actor<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
     handshake: HandshakeComplete,
     peer_pk: ed25519::PublicKey,
 ) -> Result<()> {
-    // Catch any errors which occur during replication.
-    if let Err(err) = actor_inner(
+    let mut ch_broker = BROKER.lock().await.create_sender();
+
+    // Attempt replication.
+    let replication_result = actor_inner(
         connection_data.to_owned(),
         stream_reader,
         stream_writer,
         handshake,
-        peer_pk,
     )
-    .await
-    {
-        warn!("replication failed: {:?}", err);
+    .await;
 
-        let mut ch_broker = BROKER.lock().await.create_sender();
+    match replication_result {
+        Ok(connection_data) => {
+            info!("👋 finished replication with {}", peer_pk.to_ssb_id());
 
-        // Send 'error' connection event message via the broker.
-        ch_broker
-            .send(BrokerEvent::new(
-                Destination::Broadcast,
-                ConnectionEvent::Error(connection_data, err.to_string()),
-            ))
-            .await?;
+            // Send 'disconnecting' connection event message via the broker.
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    ConnectionEvent::Disconnecting(connection_data.to_owned()),
+                ))
+                .await?;
+        }
+        Err(err) => {
+            warn!(
+                "💀 replication with {} terminated with error {:?}",
+                peer_pk.to_ssb_id(),
+                err
+            );
+
+            // Send 'error' connection event message via the broker.
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    ConnectionEvent::Error(connection_data, err.to_string()),
+                ))
+                .await?;
+        }
     }
 
     Ok(())
@@ -64,7 +84,6 @@ pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send 
     mut stream_reader: R,
     mut stream_writer: W,
     handshake: HandshakeComplete,
-    peer_pk: ed25519::PublicKey,
 ) -> Result<ConnectionData> {
     // Register the "replication" actor endpoint with the broker.
     let ActorEndpoint {
@@ -75,6 +94,11 @@ pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send 
         ..
     } = BROKER.lock().await.register("replication", true).await?;
 
+    // Set the connection idle timeout limit according to the connection
+    // manager configuration. This value is used to break out of the
+    // replication loop after n consecutive idle seconds.
+    let connection_idle_timeout_limit = CONNECTION_MANAGER.read().await.idle_timeout_limit;
+
     // Send 'replicating' connection event message via the broker.
     ch_broker
         .send(BrokerEvent::new(
@@ -83,13 +107,8 @@ pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send 
         ))
         .await?;
 
-    // Set the connection idle timeout limit according to the connection
-    // manager configuration. This value is used to break out of the
-    // replication loop after n consecutive idle seconds.
-    let connection_idle_timeout_limit = CONNECTION_MANAGER.read().await.idle_timeout_limit;
-
     // Spawn the replication loop (responsible for negotiating RPC requests).
-    let res = replication_loop(
+    replication_loop(
         actor_id,
         &mut stream_reader,
         &mut stream_writer,
@@ -98,36 +117,7 @@ pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send 
         ch_msg.unwrap(),
         connection_idle_timeout_limit,
     )
-    .await;
-
-    // TODO: consider moving this to the connection manager.
-    // Remove the peer from the list of connected peers.
-    CONNECTION_MANAGER
-        .write()
-        .await
-        .remove_connected_peer(peer_pk);
-
-    if let Err(err) = res {
-        warn!("💀 client terminated with error {:?}", err);
-
-        // Send 'error' connection event message via the broker.
-        ch_broker
-            .send(BrokerEvent::new(
-                Destination::Broadcast,
-                ConnectionEvent::Error(connection_data.to_owned(), err.to_string()),
-            ))
-            .await?;
-    } else {
-        info!("👋 finished connection with {}", &peer_pk.to_ssb_id());
-
-        // Send 'disconnected' connection event message via the broker.
-        ch_broker
-            .send(BrokerEvent::new(
-                Destination::Broadcast,
-                ConnectionEvent::Disconnected(connection_data.to_owned()),
-            ))
-            .await?;
-    }
+    .await?;
 
     let _ = ch_broker.send(BrokerEvent::Disconnect { actor_id }).await;
 

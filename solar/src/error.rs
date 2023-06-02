@@ -13,6 +13,8 @@ pub enum Error {
     AddrParse(net::AddrParseError),
     /// xdg::BaseDirectoriesError.
     BaseDirectories(xdg::BaseDirectoriesError),
+    /// Configuration error.
+    Config(String),
     /// SSB cryptograpy error.
     Crypto(crypto::Error),
     /// Sled database error.
@@ -56,6 +58,7 @@ impl fmt::Display for Error {
         match self {
             Error::AddrParse(err) => write!(f, "Failed to parse IP address: {err}"),
             Error::BaseDirectories(err) => write!(f, "Base directory error: {err}"),
+            Error::Config(err) => write!(f, "Configuration error: {err}"),
             Error::Crypto(err) => write!(f, "SSB cryptographic error: {err}"),
             Error::Database(err) => write!(f, "Key-value database error: {err}"),
             Error::DeserializeToml(err) => write!(f, "Failed to deserialize TOML: {err}"),

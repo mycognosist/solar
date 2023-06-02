@@ -57,9 +57,7 @@ impl Node {
         // Print 'starting server' announcement.
         println!(
             "Starting TCP server on {}:{}:{}",
-            &config.network.ip,
-            &config.network.port,
-            base64::encode(&config.secret.private_key[..]),
+            &config.network.ip, &config.network.port, &config.secret.public_key,
         );
 
         // Construct the TCP server listening address.

@@ -9,7 +9,7 @@ use kuska_sodiumoxide::crypto::auth::Key as NetworkKey;
 use kuska_ssb::{crypto::ToSodiumObject, discovery};
 use url::Url;
 
-use solar::{ApplicationConfig, JsonRpcConfig, NetworkConfig, Node, ReplicationConfig, Result};
+use solar::{ApplicationConfig, JsonRpcConfig, NetworkConfig, Node, Result};
 
 /// Generate a command line parser.
 /// This defines the options that are exposed when running the solar binary.
@@ -230,11 +230,8 @@ impl TryFrom<Cli> for ApplicationConfig {
         };
 
         // Define the replication configuration parameters.
-        config.replication = ReplicationConfig {
-            resync,
-            selective,
-            ..ReplicationConfig::default()
-        };
+        config.replication.resync = resync;
+        config.replication.selective = selective;
 
         Ok(config)
     }
@@ -250,7 +247,7 @@ async fn main() {
     let cli = Cli::parse().validate();
 
     // Load configuration parameters and apply defaults.
-    let config = cli.try_into().expect("could not load configuration");
+    let config = cli.try_into().expect("Could not load configuration");
 
     // Start the solar node in async runtime.
     let _node = Node::start(config).await;

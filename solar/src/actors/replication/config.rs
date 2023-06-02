@@ -5,6 +5,7 @@ use std::{
     path::Path,
 };
 
+use kuska_ssb::crypto::ToSodiumObject;
 use serde::{Deserialize, Serialize};
 
 use crate::{error::Error, Result};
@@ -71,6 +72,18 @@ impl ReplicationConfig {
                 return Err(Error::Config(format!(
                     "Peer address must be in the form 'host:port', without any URL scheme: {}",
                     addr
+                )));
+            }
+
+            // Ensure the public key is valid (base64, for example).
+            //
+            // We run the prefix and suffix checks separately (above) because
+            // the error message returned by `.to_ed25519_pk` does not always
+            // provide clear, actionable feedback.
+            if let Err(err) = public_key.to_ed25519_pk() {
+                return Err(Error::Config(format!(
+                    "Peer public key {} is invalid: {}",
+                    public_key, err
                 )));
             }
         }

@@ -37,14 +37,14 @@ impl Default for ReplicationConfig {
 }
 
 impl ReplicationConfig {
-    /// Serialize the replication configuration as a TOML byte vector.
-    pub fn to_toml(&self) -> Result<Vec<u8>> {
-        Ok(toml::to_vec(&self)?)
+    /// Serialize the replication configuration as a TOML string.
+    pub fn to_toml(&self) -> Result<String> {
+        Ok(toml::to_string(&self)?)
     }
 
-    /// Deserialize a TOML byte slice into replication configuration data.
-    pub fn from_toml(serialized_config: &[u8]) -> Result<Self> {
-        Ok(toml::from_slice::<ReplicationConfig>(serialized_config)?)
+    /// Deserialize a TOML string slice into replication configuration data.
+    pub fn from_toml(serialized_config: &str) -> Result<Self> {
+        Ok(toml::from_str::<ReplicationConfig>(serialized_config)?)
     }
 
     /// If the replication config file is not found, generate a new one and
@@ -59,15 +59,18 @@ impl ReplicationConfig {
                 "Replication configuration file not found, generated new one in {replication_config_file:?}"
             );
             let config = ReplicationConfig::default();
+            let toml_config = config.to_toml()?;
+
             let mut file = File::create(&replication_config_file)?;
-            file.write_all(&config.to_toml()?)?;
+            write!(file, "{}", toml_config)?;
+
             Ok(config)
         } else {
             // If the config file exists, open it and read the contents.
             let mut file = File::open(&replication_config_file)?;
-            let mut raw: Vec<u8> = Vec::new();
-            file.read_to_end(&mut raw)?;
-            ReplicationConfig::from_toml(&raw)
+            let mut file_contents = String::new();
+            file.read_to_string(&mut file_contents)?;
+            ReplicationConfig::from_toml(&file_contents)
         }
     }
 }

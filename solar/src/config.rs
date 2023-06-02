@@ -1,7 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use kuska_sodiumoxide::crypto::auth::Key as NetworkKey;
-use kuska_ssb::crypto::ed25519::PublicKey;
 use log::{debug, info};
 use once_cell::sync::OnceCell;
 use sled::Config as DatabaseConfig;
@@ -19,7 +18,7 @@ use crate::{
 // Write once store for the network key (aka. SHS key or caps key).
 pub static NETWORK_KEY: OnceCell<NetworkKey> = OnceCell::new();
 // Write once store for the list of Scuttlebutt peers to replicate.
-pub static PEERS_TO_REPLICATE: OnceCell<HashMap<PublicKey, String>> = OnceCell::new();
+pub static PEERS_TO_REPLICATE: OnceCell<HashMap<String, String>> = OnceCell::new();
 // Write once store for the database resync configuration.
 pub static RESYNC_CONFIG: OnceCell<bool> = OnceCell::new();
 // Write-once store for the public-private keypair.

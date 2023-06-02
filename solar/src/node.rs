@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use async_std::sync::{Arc, RwLock};
 use futures::SinkExt;
-use kuska_ssb::crypto::ed25519::PublicKey;
+use kuska_ssb::crypto::{ed25519::PublicKey, ToSodiumObject};
 use once_cell::sync::Lazy;
 
 use crate::{
@@ -107,7 +107,16 @@ impl Node {
             .replication
             .peers
             .into_iter()
-            .map(|(public_key, url)| (public_key, url))
+            .map(|(public_key, url)| {
+                (
+                    public_key
+                        .to_ed25519_pk()
+                        // Keys are validated in `ReplicationConfig` so we should be
+                        // safe to unwrap here.
+                        .expect("Failed to parse public key from replication.toml file"),
+                    url,
+                )
+            })
             .collect();
 
         // Add any connection details supplied via the `--connect` CLI option.

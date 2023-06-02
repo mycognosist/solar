@@ -107,8 +107,16 @@ impl Node {
             .replication
             .peers
             .into_iter()
-            // TODO: validate all public keys in `ReplicationConfig`
-            .map(|(public_key, url)| (public_key.to_ed25519_pk().unwrap(), url))
+            .map(|(public_key, url)| {
+                (
+                    public_key
+                        .to_ed25519_pk()
+                        // Keys are validated in `ReplicationConfig` so we should be
+                        // safe to unwrap here.
+                        .expect("Failed to parse public key from replication.toml file"),
+                    url,
+                )
+            })
             .collect();
 
         // Add any connection details supplied via the `--connect` CLI option.

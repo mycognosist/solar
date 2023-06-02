@@ -73,7 +73,7 @@ impl Node {
 
         // Print the network key.
         println!(
-            "Node deploy on network: {}",
+            "Node deployed on network: {}",
             hex::encode(config.network.key)
         );
 

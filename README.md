@@ -111,12 +111,12 @@ Peers can be manually added to the replication configuration:
 ```toml
 [peers]
 # Peer data takes the form of key-value pairs.
-# The key is the public key of a peer.
+# The key is the public key of a peer (without the '@' prefix).
 # The value is the connection address of the peer.
 # The connection address takes the form: <host>:<port>.
 # The value must be an empty string if the URL is unknown.
-"@o8lWpyLeSqV/BJV9pbxFhKpwm6Lw5k+sqexYK+zT9Tc=.ed25519" = "[200:9730:17c:7f5b:c7c6:c999:7b2a:c958]:8008"
-"@HEqy940T6uB+T+d9Jaa58aNfRzLx9eRWqkZljBmnkmk=.ed25519" = ""
+"o8lWpyLeSqV/BJV9pbxFhKpwm6Lw5k+sqexYK+zT9Tc=.ed25519" = "[200:9730:17c:7f5b:c7c6:c999:7b2a:c958]:8008"
+"HEqy940T6uB+T+d9Jaa58aNfRzLx9eRWqkZljBmnkmk=.ed25519" = ""
 ```
 
 Alternatively, peers can be added to the replication configuration via CLI options:

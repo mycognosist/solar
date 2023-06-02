@@ -7,7 +7,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::Result;
+use crate::{error::Error, Result};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ReplicationConfig {
@@ -38,13 +38,44 @@ impl Default for ReplicationConfig {
 
 impl ReplicationConfig {
     /// Serialize the replication configuration as a TOML string.
-    pub fn to_toml(&self) -> Result<String> {
+    fn to_toml(&self) -> Result<String> {
         Ok(toml::to_string(&self)?)
     }
 
     /// Deserialize a TOML string slice into replication configuration data.
-    pub fn from_toml(serialized_config: &str) -> Result<Self> {
+    fn from_toml(serialized_config: &str) -> Result<Self> {
         Ok(toml::from_str::<ReplicationConfig>(serialized_config)?)
+    }
+
+    /// Validate the contents of the replication config file.
+    fn validate(&self) -> Result<()> {
+        for (public_key, addr) in self.peers.iter() {
+            // Ensure that each public key is without a prefix.
+            if public_key.starts_with('@') {
+                return Err(Error::Config(format!(
+                    "Peer public key in replication.toml file must not include the '@' prefix: {}",
+                    public_key
+                )));
+            }
+
+            // Ensure that each public key has a suffix.
+            if !public_key.ends_with(".ed25519") {
+                return Err(Error::Config(format!(
+                    "Peer public key in replication.toml file must include the '.ed25519' suffix: {}",
+                    public_key
+                )));
+            }
+
+            // Ensure that the address is not a TCP URL.
+            if !addr.is_empty() & addr.starts_with("tcp://") {
+                return Err(Error::Config(format!(
+                    "Peer address must be in the form 'host:port', without any URL scheme: {}",
+                    addr
+                )));
+            }
+        }
+
+        Ok(())
     }
 
     /// If the replication config file is not found, generate a new one and
@@ -70,7 +101,11 @@ impl ReplicationConfig {
             let mut file = File::open(&replication_config_file)?;
             let mut file_contents = String::new();
             file.read_to_string(&mut file_contents)?;
-            ReplicationConfig::from_toml(&file_contents)
+
+            let config = ReplicationConfig::from_toml(&file_contents)?;
+            config.validate()?;
+
+            Ok(config)
         }
     }
 }

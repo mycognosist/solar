@@ -122,8 +122,6 @@ impl Node {
         // Add any connection details supplied via the `--connect` CLI option.
         peers_to_dial.extend(config.network.connect);
 
-        println!("Peers to dial: {:?}", peers_to_dial);
-
         // Spawn the connection scheduler actor. Dials remote peers on an
         // ongoing basis (at `eager` or `lazy` intervals).
         Broker::spawn(connection_scheduler::actor(

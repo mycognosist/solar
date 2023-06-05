@@ -1645,7 +1645,7 @@ dependencies = [
 
 [[package]]
 name = "solar"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "async-ctrlc",
  "async-std",
@@ -1673,7 +1673,7 @@ dependencies = [
 
 [[package]]
 name = "solar_cli"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "async-std",
  "clap",

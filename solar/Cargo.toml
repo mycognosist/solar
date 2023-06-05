@@ -1,6 +1,6 @@
 [package]
 name = "solar"
-version = "0.3.3"
+version = "0.3.4"
 authors = ["adria0 <adria@codecontext.io>", "glyph <glyph@mycelial.technology>"]
 description = "Embeddable Scuttlebutt network node"
 edition = "2018"

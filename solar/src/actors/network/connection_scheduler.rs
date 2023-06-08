@@ -73,7 +73,7 @@ impl ConnectionScheduler {
 
     /// Remove a peer from the scheduler, checking both the eager and lazy
     /// queues.
-    fn remove_peer(&mut self, peer: (PublicKey, String)) {
+    fn _remove_peer(&mut self, peer: (PublicKey, String)) {
         // First search the queue of eager peers for the given peer.
         // If found, use the returned index to remove the peer.
         if let Ok(index) = self
@@ -244,4 +244,59 @@ pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool)
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use kuska_ssb::crypto::ToSodiumObject;
+
+    #[async_std::test]
+    async fn test_add_and_remove_peers() -> Result<()> {
+        let mut connection_scheduler = ConnectionScheduler::default();
+
+        // Ensure the eager peers queue is empty.
+        assert!(connection_scheduler.eager_peers.len() == 0);
+
+        // Add a peer.
+        connection_scheduler.add_peer((
+            "QlQwWaj48J1Du5rHQXTPfifUFsPKLrOo6T5EfWfkqXU=.ed25519".to_ed25519_pk()?,
+            "ssb.mycelial.technology:8008".to_string(),
+        ));
+        assert!(connection_scheduler.eager_peers.len() == 1);
+
+        // Add a second peer.
+        connection_scheduler.add_peer((
+            "HEqy940T6uB+T+d9Jaa58aNfRzLx9eRWqkZljBmnkmk=.ed25519".to_ed25519_pk()?,
+            "127.0.0.1:8008".to_string(),
+        ));
+        assert!(connection_scheduler.eager_peers.len() == 2);
+
+        // Attempt to add the first peer again. The queue length should not
+        // change (no duplicate entries permitted).
+        connection_scheduler.add_peer((
+            "HEqy940T6uB+T+d9Jaa58aNfRzLx9eRWqkZljBmnkmk=.ed25519".to_ed25519_pk()?,
+            "127.0.0.1:8008".to_string(),
+        ));
+        assert!(connection_scheduler.eager_peers.len() == 2);
+
+        // Remove the second peer.
+        connection_scheduler._remove_peer((
+            "HEqy940T6uB+T+d9Jaa58aNfRzLx9eRWqkZljBmnkmk=.ed25519".to_ed25519_pk()?,
+            "127.0.0.1:8008".to_string(),
+        ));
+        assert!(connection_scheduler.eager_peers.len() == 1);
+
+        // Remove the first peer.
+        connection_scheduler._remove_peer((
+            "QlQwWaj48J1Du5rHQXTPfifUFsPKLrOo6T5EfWfkqXU=.ed25519".to_ed25519_pk()?,
+            "ssb.mycelial.technology:8008".to_string(),
+        ));
+
+        // Ensure the eager peers queue is empty once again.
+        assert!(connection_scheduler.eager_peers.is_empty());
+
+        Ok(())
+    }
 }

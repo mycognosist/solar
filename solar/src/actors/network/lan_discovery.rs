@@ -88,16 +88,13 @@ async fn process_broadcast(
 
     // Attempt to parse the IP / hostname, port and public key from the received
     // UDP broadcast message.
-    if let Some((server, port, peer_public_key)) = LanBroadcast::parse(&msg) {
+    if let Some((server, port, public_key)) = LanBroadcast::parse(&msg) {
         let addr = format!("{server}:{port}");
 
         // Spawn a connection actor with the given connection parameters.
         Broker::spawn(connection::actor(
             server_id.clone(),
-            TcpConnection::Dial {
-                addr,
-                peer_public_key,
-            },
+            TcpConnection::Dial { addr, public_key },
             selective_replication,
         ));
     } else {

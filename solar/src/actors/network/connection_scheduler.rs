@@ -32,6 +32,9 @@ use crate::{
     Result,
 };
 
+/// A request to dial the peer identified by the given public key.
+pub struct DialRequest(pub PublicKey);
+
 #[derive(Debug)]
 struct ConnectionScheduler {
     /// Peers with whom the last connection attempt was successful.
@@ -148,11 +151,11 @@ pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool)
             eager_tick = eager_ticker.next() => {
                 if let Some(_tick) = eager_tick {
                     // Pop a peer from the queue of eager peers.
-                    if let Some((peer_public_key, addr)) = scheduler.eager_peers.pop_front() {
+                    if let Some((public_key, addr)) = scheduler.eager_peers.pop_front() {
                         // Check if we're already connected to this peer. If so,
                         // push them to the back of the eager queue.
-                        if CONNECTION_MANAGER.read().await.contains_connected_peer(&peer_public_key) {
-                            scheduler.eager_peers.push_back((peer_public_key, addr))
+                        if CONNECTION_MANAGER.read().await.contains_connected_peer(&public_key) {
+                            scheduler.eager_peers.push_back((public_key, addr))
                         } else {
                             // Otherwise, dial the peer.
                             Broker::spawn(connection::actor(
@@ -160,7 +163,7 @@ pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool)
                                 SECRET_CONFIG.get().unwrap().to_owned_identity()?,
                                 TcpConnection::Dial {
                                     addr,
-                                    peer_public_key,
+                                    public_key,
                                 },
                                 selective_replication,
                             ));
@@ -172,18 +175,18 @@ pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool)
             lazy_tick = lazy_ticker.next() => {
                 if let Some(_tick) = lazy_tick {
                     // Pop a peer from the queue of lazy peers.
-                    if let Some((peer_public_key, addr)) = scheduler.lazy_peers.pop_front() {
+                    if let Some((public_key, addr)) = scheduler.lazy_peers.pop_front() {
                         // Check if we're already connected to this peer. If so,
                         // push them to the back of the eager queue.
-                        if CONNECTION_MANAGER.read().await.contains_connected_peer(&peer_public_key) {
-                            scheduler.eager_peers.push_back((peer_public_key, addr))
+                        if CONNECTION_MANAGER.read().await.contains_connected_peer(&public_key) {
+                            scheduler.eager_peers.push_back((public_key, addr))
                         } else {
                             // Otherwise, dial the peer.
                             Broker::spawn(connection::actor(
                                 SECRET_CONFIG.get().unwrap().to_owned_identity()?,
                                 TcpConnection::Dial {
                                     addr,
-                                    peer_public_key,
+                                    public_key,
                                 },
                                 selective_replication,
                             ));

@@ -23,7 +23,7 @@ pub enum TcpConnection {
         /// The address of a remote peer.
         addr: String,
         /// The public key of a remote peer.
-        peer_public_key: ed25519::PublicKey,
+        public_key: ed25519::PublicKey,
     },
     /// An inbound TCP connection.
     Listen { stream: TcpStream },
@@ -151,13 +151,10 @@ pub async fn actor_inner(
     // Handle a TCP connection event (inbound or outbound).
     let (stream, handshake) = match connection {
         // Handle an outbound TCP connection event.
-        TcpConnection::Dial {
-            addr,
-            peer_public_key,
-        } => {
+        TcpConnection::Dial { addr, public_key } => {
             // Update the data associated with this connection.
             connection_data.peer_addr = Some(addr.to_owned());
-            connection_data.peer_public_key = Some(peer_public_key);
+            connection_data.peer_public_key = Some(public_key);
 
             // Send 'connecting' connection event message via the broker.
             ch_broker
@@ -180,8 +177,7 @@ pub async fn actor_inner(
 
             // Attempt a secret handshake.
             let handshake =
-                handshake_client(&mut stream, network_key.to_owned(), pk, sk, peer_public_key)
-                    .await?;
+                handshake_client(&mut stream, network_key.to_owned(), pk, sk, public_key).await?;
 
             info!("💃 connected to peer {}", handshake.peer_pk.to_ssb_id());
 

@@ -1,12 +1,9 @@
 //! Dialer
 //!
 //! Dial requests are received from the connection scheduler via the broker
-//! message bus. Each request includes the public key of the peer to be dialed.
-//! Upon receiving a request, the dialer queries the address book to determine
-//! the associated address for the peer and then spawns the connection actor.
-
+//! message bus. Each request includes the public key and address of the peer
+//! to be dialed. Upon receiving a request, the dialer spawns the connection actor.
 use futures::{select_biased, FutureExt, StreamExt};
-use kuska_ssb::crypto::ed25519::PublicKey;
 
 use crate::{
     actors::network::{connection, connection::TcpConnection, connection_scheduler::DialRequest},
@@ -19,9 +16,9 @@ use crate::{
 ///
 /// Register the connection dialer with the broker (as an actor) and listen
 /// for dial requests from the scheduler. Once received, use the attached
-/// public key to lookup the outbound address from the address book and dial
-/// the peer by spawning the connection actor.
-pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool) -> Result<()> {
+/// public key and outbound address to dial the peer by spawning the connection
+/// actor.
+pub async fn actor(selective_replication: bool) -> Result<()> {
     // Register the connection dialer actor with the broker.
     let ActorEndpoint {
         ch_terminate,
@@ -38,8 +35,7 @@ pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool)
 
     let mut broker_msg_ch = ch_msg.unwrap();
 
-    // Listen for dial-peer events via the broker message bus, lookup
-    // the associated address and dial the peer.
+    // Listen for dial request events via the broker message bus and dial peers.
     loop {
         select_biased! {
             // Received termination signal. Break out of the loop.
@@ -49,23 +45,20 @@ pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool)
             // Received a message from the connection scheduler via the broker.
             msg = broker_msg_ch.next().fuse() => {
                 if let Some(msg) = msg {
+                    // TODO: see if it's possible to downcast (ie. no ref).
                     if let Some(dial_request) = msg.downcast_ref::<DialRequest>() {
                         match dial_request {
-                            DialRequest(public_key) => {
-                                // Retrieve the address associated with this key.
-                                if let addr = AddressBook::get(public_key) {
-                                    // Spawn the connection actor.
-                                    Broker::spawn(connection::actor(
-                                        SECRET_CONFIG.get().unwrap().to_owned_identity()?,
-                                        TcpConnection::Dial {
-                                            addr,
-                                            public_key,
-                                        },
-                                        selective_replication,
-                                    ));
-                                }
+                            DialRequest((public_key, addr)) => {
+                                // Spawn the connection actor.
+                                Broker::spawn(connection::actor(
+                                    SECRET_CONFIG.get().unwrap().to_owned_identity()?,
+                                    TcpConnection::Dial {
+                                        addr: addr.to_string(),
+                                        public_key: *public_key,
+                                    },
+                                    selective_replication,
+                                ));
                             }
-                            _ => (),
                         }
                     }
                 }

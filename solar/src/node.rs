@@ -9,7 +9,8 @@ use crate::{
     actors::{
         jsonrpc,
         network::{
-            connection_manager::CONNECTION_MANAGER, connection_scheduler, lan_discovery, tcp_server,
+            connection_manager::CONNECTION_MANAGER, connection_scheduler, dialer, lan_discovery,
+            tcp_server,
         },
     },
     broker::*,
@@ -120,12 +121,14 @@ impl Node {
         // Add any connection details supplied via the `--connect` CLI option.
         peers_to_dial.extend(config.network.connect);
 
-        // Spawn the connection scheduler actor. Dials remote peers on an
-        // ongoing basis (at `eager` or `lazy` intervals).
-        Broker::spawn(connection_scheduler::actor(
-            peers_to_dial,
-            config.replication.selective,
-        ));
+        // Spawn the connection dialer actor. Dials remote peers as dial
+        // requests are received from the connection scheduler.
+        Broker::spawn(dialer::actor(config.replication.selective));
+
+        // Spawn the connection scheduler actor. Sends dial requests to the
+        // dialer for remote peers on an ongoing basis (at `eager` or `lazy`
+        // intervals).
+        Broker::spawn(connection_scheduler::actor(peers_to_dial));
 
         // Spawn the connection manager message loop.
         let connection_manager_msgloop = CONNECTION_MANAGER.write().await.take_msgloop();

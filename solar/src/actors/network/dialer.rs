@@ -45,21 +45,15 @@ pub async fn actor(selective_replication: bool) -> Result<()> {
             // Received a message from the connection scheduler via the broker.
             msg = broker_msg_ch.next().fuse() => {
                 if let Some(msg) = msg {
-                    // TODO: see if it's possible to downcast (ie. no ref).
-                    if let Some(dial_request) = msg.downcast_ref::<DialRequest>() {
-                        match dial_request {
-                            DialRequest((public_key, addr)) => {
-                                // Spawn the connection actor.
-                                Broker::spawn(connection::actor(
-                                    SECRET_CONFIG.get().unwrap().to_owned_identity()?,
-                                    TcpConnection::Dial {
-                                        addr: addr.to_string(),
-                                        public_key: *public_key,
-                                    },
-                                    selective_replication,
-                                ));
-                            }
-                        }
+                    if let Some(DialRequest((public_key, addr))) = msg.downcast_ref::<DialRequest>() {
+                        Broker::spawn(connection::actor(
+                            SECRET_CONFIG.get().unwrap().to_owned_identity()?,
+                            TcpConnection::Dial {
+                                addr: addr.to_string(),
+                                public_key: *public_key,
+                            },
+                            selective_replication,
+                        ));
                     }
                 }
             }

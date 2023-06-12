@@ -2,7 +2,8 @@
 //!
 //! Peers to be dialed are added to the scheduler, with the SSB public key and an address being
 //! provided for each one. These peers are initially placed into an "eager" queue by the scheduler.
-//! Each peer is dialed, one by one, with a delay of x seconds between each dial attempt.
+//! A dial request is emitted for each peer in the "eager" queue, one by one, with a delay of 5
+//! seconds between each request.
 //!
 //! If the connection and handshake are successful, the peer is pushed to the back of the "eager"
 //! queue once the connection is complete.
@@ -10,27 +11,48 @@
 //! If the connection or handshake are unsuccessful, the peer is pushed to the back of the "lazy"
 //! queue once the connection is complete.
 //!
-//! Each peer in the "lazy" queue is dialed, one by one, with a delay of x * 10 seconds between
-//! each dial attempt.
+//! A dial request is emitted for each peer in the "lazy" queue, one by one, with a delay of 61
+//! seconds between each request.
 //!
 //! The success or failure of each dial attempt is determined by listening to connection events from
 //! the connection manager. This allows peers to be moved between queues when required.
-use std::{collections::VecDeque, time::Duration};
+use std::{collections::VecDeque, fmt::Display, time::Duration};
 
 use async_std::stream;
-use futures::{select_biased, stream::StreamExt, FutureExt};
-use kuska_ssb::crypto::ed25519::PublicKey;
+use futures::{select_biased, stream::StreamExt, FutureExt, SinkExt};
+use kuska_ssb::crypto::{ed25519::PublicKey, ToSsbId};
+use log::debug;
 
 use crate::{
-    actors::network::{
-        connection,
-        connection::TcpConnection,
-        connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
-    },
-    broker::{ActorEndpoint, Broker, BROKER},
-    config::SECRET_CONFIG,
+    actors::network::connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
+    broker::{ActorEndpoint, BrokerEvent, Destination, BROKER},
     Result,
 };
+
+/// A request to dial the peer identified by the given public key and address.
+pub struct DialRequest(pub (PublicKey, String));
+
+// Custom `Display` implementation so we can easily log dial requests.
+impl Display for DialRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (peer_public_key, peer_addr) = match &self {
+            DialRequest((key, addr)) => {
+                let ssb_id = key.to_ssb_id();
+                let peer_public_key = if ssb_id.starts_with('@') {
+                    ssb_id
+                } else {
+                    format!("@{}", ssb_id)
+                };
+
+                let peer_addr = addr.to_string();
+
+                (peer_public_key, peer_addr)
+            }
+        };
+
+        write!(f, "<DialRequest {} / {}>", peer_public_key, peer_addr)
+    }
+}
 
 #[derive(Debug)]
 struct ConnectionScheduler {
@@ -44,7 +66,7 @@ struct ConnectionScheduler {
     /// Defaults to 5 seconds.
     eager_interval: Duration,
     /// The interval in seconds between dial attempts for lazy peers.
-    /// Defaults to 60 seconds.
+    /// Defaults to 61 seconds.
     lazy_interval: Duration,
 }
 
@@ -54,7 +76,7 @@ impl Default for ConnectionScheduler {
             eager_peers: VecDeque::new(),
             lazy_peers: VecDeque::new(),
             eager_interval: Duration::from_secs(5),
-            lazy_interval: Duration::from_secs(60),
+            lazy_interval: Duration::from_secs(61),
         }
     }
 }
@@ -96,14 +118,14 @@ impl ConnectionScheduler {
 /// Start the connection scheduler.
 ///
 /// Register the connection scheduler with the broker (as an actor), start
-/// the eager and lazy dialers and listen for connection events emitted by
-/// the connection manager. Update the eager and lazy peer queues according
-/// to connection outcomes.
-pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool) -> Result<()> {
+/// the eager and lazy dial request emitters and listen for connection events
+/// emitted by the connection manager. Update the eager and lazy peer queues
+/// according to connection outcomes.
+pub async fn actor(peers: Vec<(PublicKey, String)>) -> Result<()> {
     // Register the connection scheduler actor with the broker.
     let ActorEndpoint {
         ch_terminate,
-        ch_broker: _,
+        mut ch_broker,
         ch_msg,
         actor_id: _,
         ..
@@ -125,7 +147,7 @@ pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool)
 
     // Create the tickers (aka. metronomes) which will emit messages at
     // the predetermined interval. These tickers control the rates at which
-    // we dial peers.
+    // we emit dial requests for peers.
     let mut eager_ticker = stream::interval(scheduler.eager_interval).fuse();
     let mut lazy_ticker = stream::interval(scheduler.lazy_interval).fuse();
 
@@ -148,22 +170,16 @@ pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool)
             eager_tick = eager_ticker.next() => {
                 if let Some(_tick) = eager_tick {
                     // Pop a peer from the queue of eager peers.
-                    if let Some((peer_public_key, addr)) = scheduler.eager_peers.pop_front() {
+                    if let Some((public_key, addr)) = scheduler.eager_peers.pop_front() {
                         // Check if we're already connected to this peer. If so,
                         // push them to the back of the eager queue.
-                        if CONNECTION_MANAGER.read().await.contains_connected_peer(&peer_public_key) {
-                            scheduler.eager_peers.push_back((peer_public_key, addr))
+                        if CONNECTION_MANAGER.read().await.contains_connected_peer(&public_key) {
+                            scheduler.eager_peers.push_back((public_key, addr))
                         } else {
-                            // Otherwise, dial the peer.
-                            Broker::spawn(connection::actor(
-                                // TODO: make this neater once config-sharing story has improved.
-                                SECRET_CONFIG.get().unwrap().to_owned_identity()?,
-                                TcpConnection::Dial {
-                                    addr,
-                                    peer_public_key,
-                                },
-                                selective_replication,
-                            ));
+                            // Otherwise, send a dial request to the dialer.
+                            let dial_request = DialRequest((public_key, addr));
+                            debug!("{}", dial_request);
+                            ch_broker.send(BrokerEvent::new(Destination::Broadcast, dial_request)).await?
                         }
                     }
                 }
@@ -172,21 +188,16 @@ pub async fn actor(peers: Vec<(PublicKey, String)>, selective_replication: bool)
             lazy_tick = lazy_ticker.next() => {
                 if let Some(_tick) = lazy_tick {
                     // Pop a peer from the queue of lazy peers.
-                    if let Some((peer_public_key, addr)) = scheduler.lazy_peers.pop_front() {
+                    if let Some((public_key, addr)) = scheduler.lazy_peers.pop_front() {
                         // Check if we're already connected to this peer. If so,
                         // push them to the back of the eager queue.
-                        if CONNECTION_MANAGER.read().await.contains_connected_peer(&peer_public_key) {
-                            scheduler.eager_peers.push_back((peer_public_key, addr))
+                        if CONNECTION_MANAGER.read().await.contains_connected_peer(&public_key) {
+                            scheduler.eager_peers.push_back((public_key, addr))
                         } else {
-                            // Otherwise, dial the peer.
-                            Broker::spawn(connection::actor(
-                                SECRET_CONFIG.get().unwrap().to_owned_identity()?,
-                                TcpConnection::Dial {
-                                    addr,
-                                    peer_public_key,
-                                },
-                                selective_replication,
-                            ));
+                            // Otherwise, send a dial request to the dialer.
+                            let dial_request = DialRequest((public_key, addr));
+                            debug!("{}", dial_request);
+                            ch_broker.send(BrokerEvent::new(Destination::Broadcast, dial_request)).await?
                         }
                     }
                 }

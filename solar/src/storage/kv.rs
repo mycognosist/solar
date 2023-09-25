@@ -27,7 +27,11 @@ pub enum StoKvEvent {
 
 #[derive(Default)]
 pub struct KvStorage {
+    /// The core database which stores messages and blob references.
     db: Option<sled::Db>,
+    /// A database tree which stores the message indexes.
+    index_db: Option<sled::Tree>,
+    /// A message-passing sender.
     ch_broker: Option<ChBrokerSend>,
 }
 
@@ -45,12 +49,17 @@ pub struct PubKeyAndSeqNum {
 }
 
 impl KvStorage {
-    /// Open the key-value database using the given configuration and populate
-    /// the instance of `KvStorage` with the database and message-passing
-    /// sender.
+    /// Open the key-value database using the given configuration, open a
+    /// database tree for indexes and populate the instance of `KvStorage`
+    /// with the database, indexes tree and message-passing sender.
     pub fn open(&mut self, config: sled::Config, ch_broker: ChBrokerSend) -> Result<()> {
-        self.db = Some(config.open()?);
+        let db = config.open()?;
+        let index_db = db.open_tree("indexes")?;
+
+        self.db = Some(db);
+        self.index_db = Some(index_db);
         self.ch_broker = Some(ch_broker);
+
         Ok(())
     }
 
@@ -246,7 +255,8 @@ impl KvStorage {
         })?;
         db.insert(Self::key_msg_val(&msg_val.id().to_string()), msg_ref)?;
 
-        let msg_kvt = MessageKvt::new(msg_val.clone());
+        let mut msg_kvt = MessageKvt::new(msg_val.clone());
+        msg_kvt.rts = None;
         db.insert(
             Self::key_msg_kvt(&author, seq_num),
             msg_kvt.to_string().as_bytes(),

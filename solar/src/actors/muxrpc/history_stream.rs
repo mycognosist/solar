@@ -208,6 +208,9 @@ where
             // convert that into a message value. Return an error if that fails.
             // This approach allows us to handle the unlikely event that
             // messages are sent as KVTs and not simply values.
+            //
+            // Validation of the message signature and fields is also performed
+            // as part of the call to `from_slice`.
             let msg = match Message::from_slice(res) {
                 Ok(msg) => msg,
                 Err(_) => MessageKvt::from_slice(res)?.into_message()?,

@@ -1,5 +1,8 @@
 use futures::SinkExt;
-use kuska_ssb::feed::{Feed as MessageKvt, Message as MessageValue};
+use kuska_ssb::{
+    api::dto::content::TypedMessage as MessageContent,
+    feed::{Feed as MessageKvt, Message as MessageValue},
+};
 use log::warn;
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +12,7 @@ use crate::{
     Result,
 };
 
+// TODO: Consider replacing prefix-based approach with separate db trees.
 /// Prefix for a key to the latest sequence number for a stored feed.
 const PREFIX_LATEST_SEQ: u8 = 0u8;
 /// Prefix for a key to a message KVT (Key Value Timestamp).
@@ -25,16 +29,6 @@ pub enum StoKvEvent {
     IdChanged(String),
 }
 
-#[derive(Default)]
-pub struct KvStorage {
-    /// The core database which stores messages and blob references.
-    db: Option<sled::Db>,
-    /// A database tree which stores the message indexes.
-    index_db: Option<sled::Tree>,
-    /// A message-passing sender.
-    ch_broker: Option<ChBrokerSend>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlobStatus {
     retrieved: bool,
@@ -48,16 +42,30 @@ pub struct PubKeyAndSeqNum {
     seq_num: u64,
 }
 
+// TODO: Can we remove the `Option` from all of these fields?
+// Will make the rest of the code more compact (no need to match on an
+// `Option` every time).
+// Will probably require some changes in `solar_cli` config.
+#[derive(Default)]
+pub struct KvStorage {
+    /// The core database which stores messages and blob references.
+    db: Option<sled::Db>,
+    /// Name indexes stored in a database tree.
+    name_index: Option<sled::Tree>,
+    /// A message-passing sender.
+    ch_broker: Option<ChBrokerSend>,
+}
+
 impl KvStorage {
     /// Open the key-value database using the given configuration, open a
     /// database tree for indexes and populate the instance of `KvStorage`
     /// with the database, indexes tree and message-passing sender.
     pub fn open(&mut self, config: sled::Config, ch_broker: ChBrokerSend) -> Result<()> {
         let db = config.open()?;
-        let index_db = db.open_tree("indexes")?;
+        let name_index = db.open_tree("name")?;
 
         self.db = Some(db);
-        self.index_db = Some(index_db);
+        self.name_index = Some(name_index);
         self.ch_broker = Some(ch_broker);
 
         Ok(())
@@ -203,6 +211,7 @@ impl KvStorage {
     /// Add the public key and latest sequence number of a peer to the list of
     /// peers.
     pub async fn set_peer(&self, user_id: &str, latest_seq: u64) -> Result<()> {
+        // TODO: Replace unwrap with none error and try operator.
         let db = self.db.as_ref().unwrap();
         db.insert(Self::key_peer(user_id), &latest_seq.to_be_bytes()[..])?;
 
@@ -281,12 +290,60 @@ impl KvStorage {
         // a broker deployed to receive the event message.
         if let Err(err) = self.ch_broker.as_ref().unwrap().send(broker_msg).await {
             warn!(
-                "failed to notify broker of message appended to kv store: {}",
+                "Failed to notify broker of message appended to kv store: {}",
                 err
             )
         };
 
         Ok(seq_num)
+    }
+
+    /// Index a message based on the content type.
+    fn index_msg(&self, msg_val: MessageValue) -> Result<()> {
+        if let Some(content_val) = msg_val.value.get("content") {
+            let content: MessageContent = serde_json::from_value(content_val.to_owned())?;
+
+            match content {
+                MessageContent::About { about, name, .. } => self.index_name(about, name)?,
+                _ => (),
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Add the given name into the name index for the associated public key.
+    fn index_name(&self, user_id: String, name: Option<String>) -> Result<()> {
+        if let Some(name) = name {
+            let name_index = self.name_index.as_ref().unwrap();
+            let mut names = self.get_names(&user_id)?;
+            names.push(name);
+            name_index.insert(user_id, serde_cbor::to_vec(&names)?)?;
+        }
+
+        Ok(())
+    }
+
+    /// Return all indexed names for the given public key.
+    fn get_names(&self, user_id: &str) -> Result<Vec<String>> {
+        let name_index = self.name_index.as_ref().unwrap();
+
+        // Return and deserialize the names indexed by the given SSB ID.
+        let name_set = if let Some(raw) = name_index.get(user_id)? {
+            serde_cbor::from_slice::<Vec<String>>(&raw)?
+        } else {
+            Vec::new()
+        };
+
+        Ok(name_set)
+    }
+
+    /// Return the most recently indexed name for the given public key.
+    fn get_name(&self, user_id: &str) -> Result<Option<String>> {
+        let names = self.get_names(user_id)?;
+        let name = names.last().cloned();
+
+        Ok(name)
     }
 
     /// Get all messages comprising the feed authored by the given public key.
@@ -299,6 +356,7 @@ impl KvStorage {
             for msg_seq in 1..=latest_seq {
                 // Get the message KVT for the given author and message
                 // sequence number and add it to the feed vector.
+                //
                 // TODO: consider handling the `None` case instead of
                 // unwrapping.
                 feed.push(self.get_msg_kvt(user_id, msg_seq)?.unwrap())
@@ -326,6 +384,62 @@ mod test {
         let config = KvConfig::new().path(path.path());
         kv.open(config, sender).unwrap();
         kv
+    }
+
+    #[async_std::test]
+    async fn test_name_index() -> Result<()> {
+        // Create a unique keypair to sign messages.
+        let keypair = SecretConfig::create().to_owned_identity().unwrap();
+
+        // Open a temporary key-value store.
+        let kv = open_temporary_kv();
+
+        let first_name = "mycognosist".to_string();
+
+        // Create an about-type message which assigns a name.
+        let first_msg_content = TypedMessage::About {
+            about: keypair.id.to_owned(),
+            name: Some(first_name.to_owned()),
+            branch: None,
+            description: None,
+            image: None,
+            location: None,
+            start_datetime: None,
+            title: None,
+        };
+
+        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+        let first_msg =
+            MessageValue::sign(last_msg.as_ref(), &keypair, json!(first_msg_content)).unwrap();
+
+        kv.index_msg(first_msg)?;
+
+        let name = kv.get_name(&keypair.id)?;
+        assert_eq!(name, Some(first_name));
+
+        let second_name = "glyph".to_string();
+
+        let second_msg_content = TypedMessage::About {
+            about: keypair.id.to_owned(),
+            name: Some(second_name.to_owned()),
+            branch: None,
+            description: None,
+            image: None,
+            location: None,
+            start_datetime: None,
+            title: None,
+        };
+
+        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+        let second_msg =
+            MessageValue::sign(last_msg.as_ref(), &keypair, json!(second_msg_content)).unwrap();
+
+        kv.index_msg(second_msg)?;
+
+        let lastest_name = kv.get_name(&keypair.id)?;
+        assert_eq!(lastest_name, Some(second_name));
+
+        Ok(())
     }
 
     #[async_std::test]

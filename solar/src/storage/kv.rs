@@ -50,6 +50,8 @@ pub struct PubKeyAndSeqNum {
 pub struct KvStorage {
     /// The core database which stores messages and blob references.
     db: Option<sled::Db>,
+    /// Description indexes stored in a database tree.
+    description_index: Option<sled::Tree>,
     /// Name indexes stored in a database tree.
     name_index: Option<sled::Tree>,
     /// A message-passing sender.
@@ -57,14 +59,16 @@ pub struct KvStorage {
 }
 
 impl KvStorage {
-    /// Open the key-value database using the given configuration, open a
-    /// database tree for indexes and populate the instance of `KvStorage`
-    /// with the database, indexes tree and message-passing sender.
+    /// Open the key-value database using the given configuration, open the
+    /// database index trees and populate the instance of `KvStorage`
+    /// with the database, indexes and message-passing sender.
     pub fn open(&mut self, config: sled::Config, ch_broker: ChBrokerSend) -> Result<()> {
         let db = config.open()?;
+        let description_index = db.open_tree("description")?;
         let name_index = db.open_tree("name")?;
 
         self.db = Some(db);
+        self.description_index = Some(description_index);
         self.name_index = Some(name_index);
         self.ch_broker = Some(ch_broker);
 
@@ -330,15 +334,51 @@ impl KvStorage {
         } = msg_content
         {
             if let Some(name) = name {
-                self.index_name(about, name)?
+                self.index_name(&about, name)?
+            }
+            if let Some(description) = description {
+                self.index_description(&about, description)?
             }
         }
 
         Ok(())
     }
 
-    /// Add the given name into the name index for the associated public key.
-    fn index_name(&self, user_id: String, name: String) -> Result<()> {
+    /// Add the given description to the description index for the associated
+    /// public key.
+    fn index_description(&self, user_id: &str, description: String) -> Result<()> {
+        let description_index = self.description_index.as_ref().unwrap();
+        let mut descriptions = self.get_descriptions(&user_id)?;
+        descriptions.push(description);
+        description_index.insert(user_id, serde_cbor::to_vec(&descriptions)?)?;
+
+        Ok(())
+    }
+
+    /// Return all indexed descriptions for the given public key.
+    fn get_descriptions(&self, user_id: &str) -> Result<Vec<String>> {
+        let description_index = self.description_index.as_ref().unwrap();
+
+        // Return and deserialize the descriptions indexed by the given SSB ID.
+        let descriptions = if let Some(raw) = description_index.get(user_id)? {
+            serde_cbor::from_slice::<Vec<String>>(&raw)?
+        } else {
+            Vec::new()
+        };
+
+        Ok(descriptions)
+    }
+
+    /// Return the most recently indexed description for the given public key.
+    fn get_description(&self, user_id: &str) -> Result<Option<String>> {
+        let descriptions = self.get_descriptions(user_id)?;
+        let description = descriptions.last().cloned();
+
+        Ok(description)
+    }
+
+    /// Add the given name to the name index for the associated public key.
+    fn index_name(&self, user_id: &str, name: String) -> Result<()> {
         // TODO: Do we also want to store the hash of the associated message?
         let name_index = self.name_index.as_ref().unwrap();
         let mut names = self.get_names(&user_id)?;
@@ -353,13 +393,13 @@ impl KvStorage {
         let name_index = self.name_index.as_ref().unwrap();
 
         // Return and deserialize the names indexed by the given SSB ID.
-        let name_set = if let Some(raw) = name_index.get(user_id)? {
+        let names = if let Some(raw) = name_index.get(user_id)? {
             serde_cbor::from_slice::<Vec<String>>(&raw)?
         } else {
             Vec::new()
         };
 
-        Ok(name_set)
+        Ok(names)
     }
 
     /// Return the most recently indexed name for the given public key.
@@ -411,7 +451,7 @@ mod test {
     }
 
     #[async_std::test]
-    async fn test_name_index() -> Result<()> {
+    async fn test_indexes() -> Result<()> {
         // Create a unique keypair to sign messages.
         let keypair = SecretConfig::create().to_owned_identity().unwrap();
 
@@ -419,13 +459,14 @@ mod test {
         let kv = open_temporary_kv();
 
         let first_name = "mycognosist".to_string();
+        let first_description = "just a humble fungi".to_string();
 
         // Create an about-type message which assigns a name.
         let first_msg_content = TypedMessage::About {
             about: keypair.id.to_owned(),
             name: Some(first_name.to_owned()),
             branch: None,
-            description: None,
+            description: Some(first_description.to_owned()),
             image: None,
             location: None,
             start_datetime: None,
@@ -441,13 +482,18 @@ mod test {
         let name = kv.get_name(&keypair.id)?;
         assert_eq!(name, Some(first_name));
 
+        let description = kv.get_description(&keypair.id)?;
+        assert_eq!(description, Some(first_description));
+
         let second_name = "glyph".to_string();
+        let second_description =
+            "[ sowing seeds of symbiosis | weaving webs of wu wei ]".to_string();
 
         let second_msg_content = TypedMessage::About {
             about: keypair.id.to_owned(),
             name: Some(second_name.to_owned()),
             branch: None,
-            description: None,
+            description: Some(second_description.to_owned()),
             image: None,
             location: None,
             start_datetime: None,
@@ -462,6 +508,9 @@ mod test {
 
         let lastest_name = kv.get_name(&keypair.id)?;
         assert_eq!(lastest_name, Some(second_name));
+
+        let latest_description = kv.get_description(&keypair.id)?;
+        assert_eq!(latest_description, Some(second_description));
 
         Ok(())
     }

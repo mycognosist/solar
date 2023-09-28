@@ -1,6 +1,6 @@
 use futures::SinkExt;
 use kuska_ssb::{
-    api::dto::content::TypedMessage as MessageContent,
+    api::dto::content::{Image, TypedMessage as MessageContent},
     feed::{Feed as MessageKvt, Message as MessageValue},
 };
 use log::warn;
@@ -52,6 +52,8 @@ pub struct KvStorage {
     db: Option<sled::Db>,
     /// Description indexes stored in a database tree.
     description_index: Option<sled::Tree>,
+    /// Image reference indexes stored in a database tree.
+    image_index: Option<sled::Tree>,
     /// Name indexes stored in a database tree.
     name_index: Option<sled::Tree>,
     /// A message-passing sender.
@@ -65,10 +67,12 @@ impl KvStorage {
     pub fn open(&mut self, config: sled::Config, ch_broker: ChBrokerSend) -> Result<()> {
         let db = config.open()?;
         let description_index = db.open_tree("description")?;
+        let image_index = db.open_tree("image")?;
         let name_index = db.open_tree("name")?;
 
         self.db = Some(db);
         self.description_index = Some(description_index);
+        self.image_index = Some(image_index);
         self.name_index = Some(name_index);
         self.ch_broker = Some(ch_broker);
 
@@ -325,19 +329,22 @@ impl KvStorage {
         if let MessageContent::About {
             about,
             name,
-            title,
-            branch,
+            title: _,
+            branch: _,
             image,
             description,
-            location,
-            start_datetime,
+            location: _,
+            start_datetime: _,
         } = msg_content
         {
-            if let Some(name) = name {
-                self.index_name(&about, name)?
-            }
             if let Some(description) = description {
                 self.index_description(&about, description)?
+            }
+            if let Some(image) = image {
+                self.index_image(&about, image)?
+            }
+            if let Some(name) = name {
+                self.index_name(&about, name)?
             }
         }
 
@@ -348,7 +355,7 @@ impl KvStorage {
     /// public key.
     fn index_description(&self, user_id: &str, description: String) -> Result<()> {
         let description_index = self.description_index.as_ref().unwrap();
-        let mut descriptions = self.get_descriptions(&user_id)?;
+        let mut descriptions = self.get_descriptions(user_id)?;
         descriptions.push(description);
         description_index.insert(user_id, serde_cbor::to_vec(&descriptions)?)?;
 
@@ -377,11 +384,49 @@ impl KvStorage {
         Ok(description)
     }
 
+    /// Add the given image reference to the image index for the associated
+    /// public key.
+    fn index_image(&self, user_id: &str, image: Image) -> Result<()> {
+        // TODO: Handle `Image::Complete { .. }` variant.
+        if let Image::OnlyLink(ssb_hash) = image {
+            let image_index = self.image_index.as_ref().unwrap();
+            let mut images = self.get_images(user_id)?;
+            images.push(ssb_hash);
+            image_index.insert(user_id, serde_cbor::to_vec(&images)?)?;
+        }
+
+        Ok(())
+    }
+
+    /// Return all indexed image references for the given public key.
+    fn get_images(&self, user_id: &str) -> Result<Vec<String>> {
+        let image_index = self.image_index.as_ref().unwrap();
+
+        // Return and deserialize the image references indexed by the given
+        // SSB ID.
+        let images = if let Some(raw) = image_index.get(user_id)? {
+            serde_cbor::from_slice::<Vec<String>>(&raw)?
+        } else {
+            Vec::new()
+        };
+
+        Ok(images)
+    }
+
+    /// Return the most recently indexed image reference for the given public
+    /// key.
+    fn get_image(&self, user_id: &str) -> Result<Option<String>> {
+        let images = self.get_images(user_id)?;
+        let image = images.last().cloned();
+
+        Ok(image)
+    }
+
     /// Add the given name to the name index for the associated public key.
     fn index_name(&self, user_id: &str, name: String) -> Result<()> {
         // TODO: Do we also want to store the hash of the associated message?
         let name_index = self.name_index.as_ref().unwrap();
-        let mut names = self.get_names(&user_id)?;
+        let mut names = self.get_names(user_id)?;
         names.push(name);
         name_index.insert(user_id, serde_cbor::to_vec(&names)?)?;
 
@@ -450,6 +495,7 @@ mod test {
         kv
     }
 
+    // TODO: Consider splitting this out into multiple tests, one per index.
     #[async_std::test]
     async fn test_indexes() -> Result<()> {
         // Create a unique keypair to sign messages.
@@ -460,6 +506,7 @@ mod test {
 
         let first_name = "mycognosist".to_string();
         let first_description = "just a humble fungi".to_string();
+        let image_ref = "&8M2JFEFHlxJ5q8Lmu3P4bDdCHg0SLB27Q321cy9Upx4=.sha256".to_string();
 
         // Create an about-type message which assigns a name.
         let first_msg_content = TypedMessage::About {
@@ -467,7 +514,7 @@ mod test {
             name: Some(first_name.to_owned()),
             branch: None,
             description: Some(first_description.to_owned()),
-            image: None,
+            image: Some(Image::OnlyLink(image_ref.to_owned())),
             location: None,
             start_datetime: None,
             title: None,
@@ -479,11 +526,14 @@ mod test {
 
         kv.index_msg(first_msg)?;
 
-        let name = kv.get_name(&keypair.id)?;
-        assert_eq!(name, Some(first_name));
-
         let description = kv.get_description(&keypair.id)?;
         assert_eq!(description, Some(first_description));
+
+        let image = kv.get_image(&keypair.id)?;
+        assert_eq!(image, Some(image_ref));
+
+        let name = kv.get_name(&keypair.id)?;
+        assert_eq!(name, Some(first_name));
 
         let second_name = "glyph".to_string();
         let second_description =

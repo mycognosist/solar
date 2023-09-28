@@ -276,14 +276,14 @@ impl KvStorage {
         // list of peers.
         self.set_peer(&author, seq_num).await?;
 
+        // Pass the message to the indexer.
+        self.index_msg(msg_val)?;
+
         db.flush_async().await?;
 
         // Publish a notification that the feed belonging to the given public
         // key has been updated.
-        let broker_msg = BrokerEvent::new(
-            Destination::Broadcast,
-            StoKvEvent::IdChanged(msg_val.author().clone()),
-        );
+        let broker_msg = BrokerEvent::new(Destination::Broadcast, StoKvEvent::IdChanged(author));
 
         // Matching on the error here (instead of unwrapping) allows us to
         // write unit tests for `append_feed`; a case where we do not have

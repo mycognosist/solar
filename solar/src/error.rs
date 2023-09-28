@@ -31,6 +31,8 @@ pub enum Error {
     JsonRpc(jsonrpsee::core::Error),
     /// LAN UDP discovery error.
     LanDiscovery(discovery::Error),
+    /// SSB message type field error.
+    MessageType(String),
     /// SSB RPC error.
     MuxRpc(rpc::Error),
     /// Secret handshake error.
@@ -73,6 +75,7 @@ impl fmt::Display for Error {
             Error::Io(err) => write!(f, "I/O error: {err}"),
             Error::JsonRpc(err) => write!(f, "JSON-RPC error: {err}"),
             Error::LanDiscovery(err) => write!(f, "LAN UDP discovery error: {err}"),
+            Error::MessageType(err) => write!(f, "SSB message type field error: {err}"),
             Error::MuxRpc(err) => write!(f, "MUXRPC error: {err}"),
             Error::SecretHandshake(err) => write!(f, "Secret handshake error: {err}"),
             Error::SerdeCbor(err) => write!(f, "Serde CBOR error: {err}"),

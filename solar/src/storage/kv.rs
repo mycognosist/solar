@@ -304,7 +304,7 @@ impl KvStorage {
             let content: MessageContent = serde_json::from_value(content_val.to_owned())?;
 
             match content {
-                MessageContent::About { about, name, .. } => self.index_name(about, name)?,
+                MessageContent::About { .. } => self.index_about(content)?,
                 _ => (),
             }
         }
@@ -312,14 +312,38 @@ impl KvStorage {
         Ok(())
     }
 
-    /// Add the given name into the name index for the associated public key.
-    fn index_name(&self, user_id: String, name: Option<String>) -> Result<()> {
-        if let Some(name) = name {
-            let name_index = self.name_index.as_ref().unwrap();
-            let mut names = self.get_names(&user_id)?;
-            names.push(name);
-            name_index.insert(user_id, serde_cbor::to_vec(&names)?)?;
+    /// Index the content of an about-type message.
+    fn index_about(&self, msg_content: MessageContent) -> Result<()> {
+        // Match on each field of an about-type message and call each individual
+        // indexer as required. This allows us to catch the possibility that
+        // multiple fields are set in a single message (such as name and
+        // description).
+        if let MessageContent::About {
+            about,
+            name,
+            title,
+            branch,
+            image,
+            description,
+            location,
+            start_datetime,
+        } = msg_content
+        {
+            if let Some(name) = name {
+                self.index_name(about, name)?
+            }
         }
+
+        Ok(())
+    }
+
+    /// Add the given name into the name index for the associated public key.
+    fn index_name(&self, user_id: String, name: String) -> Result<()> {
+        // TODO: Do we also want to store the hash of the associated message?
+        let name_index = self.name_index.as_ref().unwrap();
+        let mut names = self.get_names(&user_id)?;
+        names.push(name);
+        name_index.insert(user_id, serde_cbor::to_vec(&names)?)?;
 
         Ok(())
     }

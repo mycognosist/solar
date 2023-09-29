@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use futures::SinkExt;
 use kuska_ssb::{
     api::dto::content::{Image, TypedMessage as MessageContent},
@@ -50,6 +52,10 @@ pub struct PubKeyAndSeqNum {
 pub struct KvStorage {
     /// The core database which stores messages and blob references.
     db: Option<sled::Db>,
+    /// Channel subscriber indexes stored in a database tree.
+    channel_subscriber_index: Option<sled::Tree>,
+    /// Channel subscription indexes stored in a database tree.
+    channel_subscription_index: Option<sled::Tree>,
     /// Description indexes stored in a database tree.
     description_index: Option<sled::Tree>,
     /// Image reference indexes stored in a database tree.
@@ -66,11 +72,15 @@ impl KvStorage {
     /// with the database, indexes and message-passing sender.
     pub fn open(&mut self, config: sled::Config, ch_broker: ChBrokerSend) -> Result<()> {
         let db = config.open()?;
+        let channel_subscriber_index = db.open_tree("channel_subscriber")?;
+        let channel_subscription_index = db.open_tree("channel_subscription")?;
         let description_index = db.open_tree("description")?;
         let image_index = db.open_tree("image")?;
         let name_index = db.open_tree("name")?;
 
         self.db = Some(db);
+        self.channel_subscriber_index = Some(channel_subscriber_index);
+        self.channel_subscription_index = Some(channel_subscription_index);
         self.description_index = Some(description_index);
         self.image_index = Some(image_index);
         self.name_index = Some(name_index);
@@ -284,8 +294,8 @@ impl KvStorage {
         // list of peers.
         self.set_peer(&author, seq_num).await?;
 
-        // Pass the message to the indexer.
-        self.index_msg(msg_val)?;
+        // Pass the author and message value to the indexer.
+        self.index_msg(&author, msg_val)?;
 
         db.flush_async().await?;
 
@@ -306,13 +316,17 @@ impl KvStorage {
         Ok(seq_num)
     }
 
-    /// Index a message based on the content type.
-    fn index_msg(&self, msg_val: MessageValue) -> Result<()> {
+    /// Index a message based on the author (SSB ID) and content type.
+    fn index_msg(&self, author: &str, msg_val: MessageValue) -> Result<()> {
         if let Some(content_val) = msg_val.value.get("content") {
             let content: MessageContent = serde_json::from_value(content_val.to_owned())?;
 
             match content {
                 MessageContent::About { .. } => self.index_about(content)?,
+                MessageContent::Channel {
+                    channel,
+                    subscribed,
+                } => self.index_channel(author, channel, subscribed)?,
                 _ => (),
             }
         }
@@ -320,6 +334,10 @@ impl KvStorage {
         Ok(())
     }
 
+    // TODO: We need to also pass in the message author and include that
+    // data in the index. This is in order to know whom the about message
+    // was created by. Ie. is it self-description (updating one's own profile)
+    // or description of another?
     /// Index the content of an about-type message.
     fn index_about(&self, msg_content: MessageContent) -> Result<()> {
         // Match on each field of an about-type message and call each individual
@@ -328,13 +346,10 @@ impl KvStorage {
         // description).
         if let MessageContent::About {
             about,
-            name,
-            title: _,
-            branch: _,
-            image,
             description,
-            location: _,
-            start_datetime: _,
+            image,
+            name,
+            ..
         } = msg_content
         {
             if let Some(description) = description {
@@ -349,6 +364,88 @@ impl KvStorage {
         }
 
         Ok(())
+    }
+
+    /// Add the given channel to the channel index.
+    fn index_channel(&self, user_id: &str, channel: String, subscribed: bool) -> Result<()> {
+        self.index_channel_subscriber(user_id, &channel, subscribed)?;
+        self.index_channel_subscription(user_id, &channel, subscribed)?;
+
+        Ok(())
+    }
+
+    /// Update the channel subscribers index for the given public key, channel
+    /// and subscription state.
+    fn index_channel_subscriber(
+        &self,
+        user_id: &str,
+        channel: &str,
+        subscribed: bool,
+    ) -> Result<()> {
+        let channel_subscriber_index = self.channel_subscriber_index.as_ref().unwrap();
+        let mut subscribers = self.get_channel_subscribers(channel)?;
+
+        if subscribed {
+            subscribers.insert(user_id.to_owned());
+        } else {
+            subscribers.remove(user_id);
+        }
+
+        channel_subscriber_index.insert(channel, serde_cbor::to_vec(&subscribers)?)?;
+
+        Ok(())
+    }
+
+    /// Return all subscribers of the given channel.
+    fn get_channel_subscribers(&self, channel: &str) -> Result<HashSet<String>> {
+        let channel_subscriber_index = self.channel_subscriber_index.as_ref().unwrap();
+
+        // Return and deserialize the channel subscribers indexed by the
+        // given channel.
+        let subscribers = if let Some(raw) = channel_subscriber_index.get(channel)? {
+            serde_cbor::from_slice::<HashSet<String>>(&raw)?
+        } else {
+            HashSet::new()
+        };
+
+        Ok(subscribers)
+    }
+
+    /// Update the channel subscription index for the given public key, channel
+    /// and subscription state.
+    fn index_channel_subscription(
+        &self,
+        user_id: &str,
+        channel: &str,
+        subscribed: bool,
+    ) -> Result<()> {
+        let channel_subscription_index = self.channel_subscription_index.as_ref().unwrap();
+        let mut subscriptions = self.get_channel_subscriptions(user_id)?;
+
+        if subscribed {
+            subscriptions.insert(channel.to_owned());
+        } else {
+            subscriptions.remove(channel);
+        }
+
+        channel_subscription_index.insert(user_id, serde_cbor::to_vec(&subscriptions)?)?;
+
+        Ok(())
+    }
+
+    /// Return all the channel subscriptions for the given public key.
+    fn get_channel_subscriptions(&self, user_id: &str) -> Result<HashSet<String>> {
+        let channel_subscription_index = self.channel_subscription_index.as_ref().unwrap();
+
+        // Return and deserialize the channel subscriptions indexed by the
+        // given public key.
+        let subscriptions = if let Some(raw) = channel_subscription_index.get(user_id)? {
+            serde_cbor::from_slice::<HashSet<String>>(&raw)?
+        } else {
+            HashSet::new()
+        };
+
+        Ok(subscriptions)
     }
 
     /// Add the given description to the description index for the associated
@@ -480,7 +577,7 @@ impl KvStorage {
 mod test {
     use super::*;
 
-    use kuska_ssb::api::dto::content::TypedMessage;
+    use kuska_ssb::{api::dto::content::TypedMessage, keystore::OwnedIdentity};
     use serde_json::json;
     use sled::Config as KvConfig;
 
@@ -495,14 +592,19 @@ mod test {
         kv
     }
 
-    // TODO: Consider splitting this out into multiple tests, one per index.
-    #[async_std::test]
-    async fn test_indexes() -> Result<()> {
+    fn initialise_keypair_and_kv() -> (OwnedIdentity, KvStorage) {
         // Create a unique keypair to sign messages.
         let keypair = SecretConfig::create().to_owned_identity().unwrap();
 
         // Open a temporary key-value store.
         let kv = open_temporary_kv();
+
+        (keypair, kv)
+    }
+
+    #[async_std::test]
+    async fn test_about_indexes() -> Result<()> {
+        let (keypair, kv) = initialise_keypair_and_kv();
 
         let first_name = "mycognosist".to_string();
         let first_description = "just a humble fungi".to_string();
@@ -524,7 +626,7 @@ mod test {
         let first_msg =
             MessageValue::sign(last_msg.as_ref(), &keypair, json!(first_msg_content)).unwrap();
 
-        kv.index_msg(first_msg)?;
+        kv.index_msg(&keypair.id, first_msg)?;
 
         let description = kv.get_description(&keypair.id)?;
         assert_eq!(description, Some(first_description));
@@ -554,7 +656,7 @@ mod test {
         let second_msg =
             MessageValue::sign(last_msg.as_ref(), &keypair, json!(second_msg_content)).unwrap();
 
-        kv.index_msg(second_msg)?;
+        kv.index_msg(&keypair.id, second_msg)?;
 
         let lastest_name = kv.get_name(&keypair.id)?;
         assert_eq!(lastest_name, Some(second_name));
@@ -566,13 +668,56 @@ mod test {
     }
 
     #[async_std::test]
+    async fn test_channel_indexes() -> Result<()> {
+        let (keypair, kv) = initialise_keypair_and_kv();
+
+        let channel = "myco".to_string();
+        let subscribed = true;
+
+        // Create a channel-type message which subscribes to a channel.
+        let first_msg_content = TypedMessage::Channel {
+            channel: channel.to_owned(),
+            subscribed,
+        };
+
+        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+        let first_msg =
+            MessageValue::sign(last_msg.as_ref(), &keypair, json!(first_msg_content)).unwrap();
+
+        kv.index_msg(&keypair.id, first_msg)?;
+
+        let subscribers = kv.get_channel_subscribers(&channel)?;
+        assert!(subscribers.contains(&keypair.id));
+
+        let subscriptions = kv.get_channel_subscriptions(&keypair.id)?;
+        assert!(subscriptions.contains(&channel));
+
+        // Create a channel-type message which unsubscribes to a channel.
+        let second_msg_content = TypedMessage::Channel {
+            channel: channel.to_owned(),
+            subscribed: false,
+        };
+
+        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+        let second_msg =
+            MessageValue::sign(last_msg.as_ref(), &keypair, json!(second_msg_content)).unwrap();
+
+        kv.index_msg(&keypair.id, second_msg)?;
+
+        let subscribers = kv.get_channel_subscribers(&channel)?;
+        assert!(!subscribers.contains(&keypair.id));
+
+        let subscriptions = kv.get_channel_subscriptions(&keypair.id)?;
+        assert!(!subscriptions.contains(&channel));
+
+        Ok(())
+    }
+
+    #[async_std::test]
     async fn test_feed_length() -> Result<()> {
         use kuska_ssb::feed::Message;
-        // Create a unique keypair to sign messages.
-        let keypair = SecretConfig::create().to_owned_identity().unwrap();
 
-        // Open a temporary key-value store.
-        let kv = open_temporary_kv();
+        let (keypair, kv) = initialise_keypair_and_kv();
 
         let mut last_msg: Option<Message> = None;
         for i in 1..=4 {
@@ -600,11 +745,7 @@ mod test {
 
     #[async_std::test]
     async fn test_single_message_content_matches() -> Result<()> {
-        // Create a unique keypair to sign messages.
-        let keypair = SecretConfig::create().to_owned_identity().unwrap();
-
-        // Open a temporary key-value store.
-        let kv = open_temporary_kv();
+        let (keypair, kv) = initialise_keypair_and_kv();
 
         // Create a post-type message.
         let msg_content = TypedMessage::Post {
@@ -636,11 +777,7 @@ mod test {
 
     #[async_std::test]
     async fn test_new_feed_is_empty() -> Result<()> {
-        // Create a unique keypair to sign messages.
-        let keypair = SecretConfig::create().to_owned_identity().unwrap();
-
-        // Open a temporary key-value store.
-        let kv = open_temporary_kv();
+        let (keypair, kv) = initialise_keypair_and_kv();
 
         // Lookup the value of the previous message. This will be `None`
         let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
@@ -659,11 +796,7 @@ mod test {
     // it with messages). Perhaps this could be broken up in the future.
     #[async_std::test]
     async fn test_append_feed() -> Result<()> {
-        // Create a unique keypair to sign messages.
-        let keypair = SecretConfig::create().to_owned_identity().unwrap();
-
-        // Open a temporary key-value store.
-        let kv = open_temporary_kv();
+        let (keypair, kv) = initialise_keypair_and_kv();
 
         // Create a post-type message.
         let msg_content = TypedMessage::Post {

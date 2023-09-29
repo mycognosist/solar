@@ -90,91 +90,6 @@ impl Indexes {
         Ok(())
     }
 
-    /// Index the content of a contact-type message.
-    fn index_contact(&self, user_id: &str, msg_content: MessageContent) -> Result<()> {
-        if let MessageContent::Contact {
-            contact,
-            blocking,
-            following,
-            ..
-        } = msg_content
-        {
-            if let Some(contact) = contact {
-                if let Some(blocking) = blocking {
-                    self.index_blocking(user_id, contact, blocking)?
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Add the given block to the block indexes.
-    fn index_blocking(&self, user_id: &str, contact: String, blocking: bool) -> Result<()> {
-        self.index_block(user_id, &contact, blocking)?;
-        self.index_blocker(user_id, &contact, blocking)?;
-
-        Ok(())
-    }
-
-    /// Return the public keys representing all peers blocked by the given
-    /// public key.
-    fn get_blocks(&self, blocker_id: &str) -> Result<HashSet<String>> {
-        let blocks = if let Some(raw) = self.blocks.get(blocker_id)? {
-            serde_cbor::from_slice::<HashSet<String>>(&raw)?
-        } else {
-            HashSet::new()
-        };
-
-        Ok(blocks)
-    }
-
-    /// Update the blocks index for the given blocker ID, blocked ID and block
-    /// state.
-    fn index_block(&self, blocker_id: &str, blocked_id: &str, blocked: bool) -> Result<()> {
-        let mut blocks = self.get_blocks(blocker_id)?;
-
-        if blocked {
-            blocks.insert(blocked_id.to_owned());
-        } else {
-            blocks.remove(blocked_id);
-        }
-
-        self.blocks
-            .insert(blocker_id, serde_cbor::to_vec(&blocks)?)?;
-
-        Ok(())
-    }
-
-    /// Return the public keys representing all peers blocking the given
-    /// public key.
-    fn get_blockers(&self, blocked_id: &str) -> Result<HashSet<String>> {
-        let blockers = if let Some(raw) = self.blockers.get(blocked_id)? {
-            serde_cbor::from_slice::<HashSet<String>>(&raw)?
-        } else {
-            HashSet::new()
-        };
-
-        Ok(blockers)
-    }
-
-    /// Update the blockers index for the given blocker ID, blocked ID and block
-    /// state.
-    fn index_blocker(&self, blocker_id: &str, blocked_id: &str, blocked: bool) -> Result<()> {
-        let mut blockers = self.get_blockers(blocked_id)?;
-
-        if blocked {
-            blockers.insert(blocker_id.to_owned());
-        } else {
-            blockers.remove(blocker_id);
-        }
-
-        self.blockers
-            .insert(blocked_id, serde_cbor::to_vec(&blockers)?)?;
-
-        Ok(())
-    }
-
     /// Index the content of an about-type message.
     fn index_about(&self, user_id: &str, msg_content: MessageContent) -> Result<()> {
         // Match on each field of an about-type message and call each individual
@@ -201,6 +116,72 @@ impl Indexes {
         }
 
         Ok(())
+    }
+
+    /// Add the given block to the block indexes.
+    fn index_blocking(&self, user_id: &str, contact: String, blocking: bool) -> Result<()> {
+        self.index_block(user_id, &contact, blocking)?;
+        self.index_blocker(user_id, &contact, blocking)?;
+
+        Ok(())
+    }
+
+    /// Update the blocks index for the given blocker ID, blocked ID and block
+    /// state.
+    fn index_block(&self, blocker_id: &str, blocked_id: &str, blocked: bool) -> Result<()> {
+        let mut blocks = self.get_blocks(blocker_id)?;
+
+        if blocked {
+            blocks.insert(blocked_id.to_owned());
+        } else {
+            blocks.remove(blocked_id);
+        }
+
+        self.blocks
+            .insert(blocker_id, serde_cbor::to_vec(&blocks)?)?;
+
+        Ok(())
+    }
+
+    /// Return the public keys representing all peers blocked by the given
+    /// public key.
+    fn get_blocks(&self, blocker_id: &str) -> Result<HashSet<String>> {
+        let blocks = if let Some(raw) = self.blocks.get(blocker_id)? {
+            serde_cbor::from_slice::<HashSet<String>>(&raw)?
+        } else {
+            HashSet::new()
+        };
+
+        Ok(blocks)
+    }
+
+    /// Update the blockers index for the given blocker ID, blocked ID and block
+    /// state.
+    fn index_blocker(&self, blocker_id: &str, blocked_id: &str, blocked: bool) -> Result<()> {
+        let mut blockers = self.get_blockers(blocked_id)?;
+
+        if blocked {
+            blockers.insert(blocker_id.to_owned());
+        } else {
+            blockers.remove(blocker_id);
+        }
+
+        self.blockers
+            .insert(blocked_id, serde_cbor::to_vec(&blockers)?)?;
+
+        Ok(())
+    }
+
+    /// Return the public keys representing all peers blocking the given
+    /// public key.
+    fn get_blockers(&self, blocked_id: &str) -> Result<HashSet<String>> {
+        let blockers = if let Some(raw) = self.blockers.get(blocked_id)? {
+            serde_cbor::from_slice::<HashSet<String>>(&raw)?
+        } else {
+            HashSet::new()
+        };
+
+        Ok(blockers)
     }
 
     /// Add the given channel to the channel indexes.
@@ -275,6 +256,25 @@ impl Indexes {
         };
 
         Ok(subscriptions)
+    }
+
+    /// Index the content of a contact-type message.
+    fn index_contact(&self, user_id: &str, msg_content: MessageContent) -> Result<()> {
+        if let MessageContent::Contact {
+            contact,
+            blocking,
+            following,
+            ..
+        } = msg_content
+        {
+            if let Some(contact) = contact {
+                if let Some(blocking) = blocking {
+                    self.index_blocking(user_id, contact, blocking)?
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Add the given description to the description index for the associated

@@ -22,6 +22,8 @@ pub struct Indexes {
     descriptions: Tree,
     /// Follows.
     follows: Tree,
+    /// Followers.
+    followers: Tree,
     /// Image references.
     images: Tree,
     /// Names.
@@ -37,6 +39,7 @@ impl Indexes {
         channel_subscriptions: Tree,
         descriptions: Tree,
         follows: Tree,
+        followers: Tree,
         images: Tree,
         names: Tree,
     ) -> Self {
@@ -47,6 +50,7 @@ impl Indexes {
             channel_subscriptions,
             descriptions,
             follows,
+            followers,
             images,
             names,
         }
@@ -60,6 +64,7 @@ impl Indexes {
         let channel_subscriptions = db.open_tree("channel_subscriptions")?;
         let descriptions = db.open_tree("descriptions")?;
         let follows = db.open_tree("follows")?;
+        let followers = db.open_tree("followers")?;
         let images = db.open_tree("images")?;
         let names = db.open_tree("names")?;
 
@@ -70,6 +75,7 @@ impl Indexes {
             channel_subscriptions,
             descriptions,
             follows,
+            followers,
             images,
             names,
         );
@@ -344,7 +350,7 @@ impl Indexes {
     /// Add the given follow to the follow indexes.
     fn index_following(&self, user_id: &str, contact: &str, following: bool) -> Result<()> {
         self.index_follow(user_id, contact, following)?;
-        //self.index_follower(user_id, &contact, following)?;
+        self.index_follower(user_id, contact, following)?;
 
         Ok(())
     }
@@ -376,6 +382,35 @@ impl Indexes {
         };
 
         Ok(follows)
+    }
+
+    /// Update the followers index for the given follower ID, followed ID and
+    /// follow state.
+    fn index_follower(&self, follower_id: &str, followed_id: &str, followed: bool) -> Result<()> {
+        let mut followers = self.get_followers(followed_id)?;
+
+        if followed {
+            followers.insert(follower_id.to_owned());
+        } else {
+            followers.remove(follower_id);
+        }
+
+        self.followers
+            .insert(followed_id, serde_cbor::to_vec(&followers)?)?;
+
+        Ok(())
+    }
+
+    /// Return the public keys representing all peers who follow the given
+    /// public key.
+    fn get_followers(&self, followed_id: &str) -> Result<HashSet<String>> {
+        let followers = if let Some(raw) = self.followers.get(followed_id)? {
+            serde_cbor::from_slice::<HashSet<String>>(&raw)?
+        } else {
+            HashSet::new()
+        };
+
+        Ok(followers)
     }
 
     /// Add the given image reference to the image index for the associated
@@ -663,6 +698,9 @@ mod test {
             let follows = indexes.get_follows(&keypair.id)?;
             assert!(!follows.contains(&blocked_keypair.id));
 
+            let followers = indexes.get_followers(&blocked_keypair.id)?;
+            assert!(!followers.contains(&keypair.id));
+
             // Create a contact-type message which unblocks an ID.
             let unblock_msg_content = TypedMessage::Contact {
                 contact: Some(blocked_keypair.id.to_owned()),
@@ -686,6 +724,9 @@ mod test {
 
             let follows = indexes.get_follows(&keypair.id)?;
             assert!(follows.contains(&blocked_keypair.id));
+
+            let followers = indexes.get_followers(&blocked_keypair.id)?;
+            assert!(followers.contains(&keypair.id));
         }
 
         Ok(())

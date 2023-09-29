@@ -12,6 +12,8 @@ use crate::Result;
 pub struct Indexes {
     /// Blocks.
     blocks: Tree,
+    /// Blockers.
+    blockers: Tree,
     /// Channel subscribers.
     channel_subscribers: Tree,
     /// Channel subscriptions.
@@ -28,6 +30,7 @@ impl Indexes {
     /// Instantiate the indexes.
     fn new(
         blocks: Tree,
+        blockers: Tree,
         channel_subscribers: Tree,
         channel_subscriptions: Tree,
         descriptions: Tree,
@@ -36,6 +39,7 @@ impl Indexes {
     ) -> Self {
         Self {
             blocks,
+            blockers,
             channel_subscribers,
             channel_subscriptions,
             descriptions,
@@ -47,6 +51,7 @@ impl Indexes {
     /// Open a database tree for each index.
     pub fn open(db: &Db) -> Result<Indexes> {
         let blocks = db.open_tree("blocks")?;
+        let blockers = db.open_tree("blockers")?;
         let channel_subscribers = db.open_tree("channel_subscribers")?;
         let channel_subscriptions = db.open_tree("channel_subscriptions")?;
         let descriptions = db.open_tree("descriptions")?;
@@ -55,6 +60,7 @@ impl Indexes {
 
         let indexes = Indexes::new(
             blocks,
+            blockers,
             channel_subscribers,
             channel_subscriptions,
             descriptions,
@@ -106,7 +112,7 @@ impl Indexes {
     /// Add the given block to the block indexes.
     fn index_blocking(&self, user_id: &str, contact: String, blocking: bool) -> Result<()> {
         self.index_block(user_id, &contact, blocking)?;
-        //self.index_blocker(user_id, &contact, blocking)?;
+        self.index_blocker(user_id, &contact, blocking)?;
 
         Ok(())
     }
@@ -136,6 +142,35 @@ impl Indexes {
 
         self.blocks
             .insert(blocker_id, serde_cbor::to_vec(&blocks)?)?;
+
+        Ok(())
+    }
+
+    /// Return the public keys representing all peers blocking the given
+    /// public key.
+    fn get_blockers(&self, blocked_id: &str) -> Result<HashSet<String>> {
+        let blockers = if let Some(raw) = self.blockers.get(blocked_id)? {
+            serde_cbor::from_slice::<HashSet<String>>(&raw)?
+        } else {
+            HashSet::new()
+        };
+
+        Ok(blockers)
+    }
+
+    /// Update the blockers index for the given blocker ID, blocked ID and block
+    /// state.
+    fn index_blocker(&self, blocker_id: &str, blocked_id: &str, blocked: bool) -> Result<()> {
+        let mut blockers = self.get_blockers(blocked_id)?;
+
+        if blocked {
+            blockers.insert(blocker_id.to_owned());
+        } else {
+            blockers.remove(blocker_id);
+        }
+
+        self.blockers
+            .insert(blocked_id, serde_cbor::to_vec(&blockers)?)?;
 
         Ok(())
     }
@@ -576,6 +611,9 @@ mod test {
             let blocks = indexes.get_blocks(&keypair.id)?;
             assert!(blocks.contains(&blocked_keypair.id));
 
+            let blockers = indexes.get_blockers(&blocked_keypair.id)?;
+            assert!(blockers.contains(&keypair.id));
+
             // Create a contact-type message which unblocks an ID.
             let unblock_msg_content = TypedMessage::Contact {
                 contact: Some(blocked_keypair.id.to_owned()),
@@ -593,6 +631,9 @@ mod test {
 
             let blocks = indexes.get_blocks(&keypair.id)?;
             assert!(!blocks.contains(&blocked_keypair.id));
+
+            let blockers = indexes.get_blockers(&blocked_keypair.id)?;
+            assert!(!blockers.contains(&keypair.id));
         }
 
         Ok(())

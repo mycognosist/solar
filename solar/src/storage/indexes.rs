@@ -20,6 +20,8 @@ pub struct Indexes {
     channel_subscriptions: Tree,
     /// Descriptions.
     descriptions: Tree,
+    /// Follows.
+    follows: Tree,
     /// Image references.
     images: Tree,
     /// Names.
@@ -34,6 +36,7 @@ impl Indexes {
         channel_subscribers: Tree,
         channel_subscriptions: Tree,
         descriptions: Tree,
+        follows: Tree,
         images: Tree,
         names: Tree,
     ) -> Self {
@@ -43,6 +46,7 @@ impl Indexes {
             channel_subscribers,
             channel_subscriptions,
             descriptions,
+            follows,
             images,
             names,
         }
@@ -55,6 +59,7 @@ impl Indexes {
         let channel_subscribers = db.open_tree("channel_subscribers")?;
         let channel_subscriptions = db.open_tree("channel_subscriptions")?;
         let descriptions = db.open_tree("descriptions")?;
+        let follows = db.open_tree("follows")?;
         let images = db.open_tree("images")?;
         let names = db.open_tree("names")?;
 
@@ -64,6 +69,7 @@ impl Indexes {
             channel_subscribers,
             channel_subscriptions,
             descriptions,
+            follows,
             images,
             names,
         );
@@ -119,9 +125,9 @@ impl Indexes {
     }
 
     /// Add the given block to the block indexes.
-    fn index_blocking(&self, user_id: &str, contact: String, blocking: bool) -> Result<()> {
-        self.index_block(user_id, &contact, blocking)?;
-        self.index_blocker(user_id, &contact, blocking)?;
+    fn index_blocking(&self, user_id: &str, contact: &str, blocking: bool) -> Result<()> {
+        self.index_block(user_id, contact, blocking)?;
+        self.index_blocker(user_id, contact, blocking)?;
 
         Ok(())
     }
@@ -269,7 +275,10 @@ impl Indexes {
         {
             if let Some(contact) = contact {
                 if let Some(blocking) = blocking {
-                    self.index_blocking(user_id, contact, blocking)?
+                    self.index_blocking(user_id, &contact, blocking)?
+                }
+                if let Some(following) = following {
+                    self.index_following(user_id, &contact, following)?
                 }
             }
         }
@@ -330,6 +339,43 @@ impl Indexes {
         let description = self_descriptions.last().cloned();
 
         Ok(description)
+    }
+
+    /// Add the given follow to the follow indexes.
+    fn index_following(&self, user_id: &str, contact: &str, following: bool) -> Result<()> {
+        self.index_follow(user_id, contact, following)?;
+        //self.index_follower(user_id, &contact, following)?;
+
+        Ok(())
+    }
+
+    /// Update the follows index for the given follower ID, followed ID and
+    /// follow state.
+    fn index_follow(&self, follower_id: &str, followed_id: &str, followed: bool) -> Result<()> {
+        let mut follows = self.get_follows(follower_id)?;
+
+        if followed {
+            follows.insert(followed_id.to_owned());
+        } else {
+            follows.remove(followed_id);
+        }
+
+        self.follows
+            .insert(follower_id, serde_cbor::to_vec(&follows)?)?;
+
+        Ok(())
+    }
+
+    /// Return the public keys representing all peers followed by the given
+    /// public key.
+    fn get_follows(&self, follower_id: &str) -> Result<HashSet<String>> {
+        let follows = if let Some(raw) = self.follows.get(follower_id)? {
+            serde_cbor::from_slice::<HashSet<String>>(&raw)?
+        } else {
+            HashSet::new()
+        };
+
+        Ok(follows)
     }
 
     /// Add the given image reference to the image index for the associated
@@ -598,7 +644,7 @@ mod test {
             let block_msg_content = TypedMessage::Contact {
                 contact: Some(blocked_keypair.id.to_owned()),
                 blocking: Some(true),
-                following: None,
+                following: Some(false),
                 autofollow: None,
             };
 
@@ -614,11 +660,14 @@ mod test {
             let blockers = indexes.get_blockers(&blocked_keypair.id)?;
             assert!(blockers.contains(&keypair.id));
 
+            let follows = indexes.get_follows(&keypair.id)?;
+            assert!(!follows.contains(&blocked_keypair.id));
+
             // Create a contact-type message which unblocks an ID.
             let unblock_msg_content = TypedMessage::Contact {
                 contact: Some(blocked_keypair.id.to_owned()),
                 blocking: Some(false),
-                following: None,
+                following: Some(true),
                 autofollow: None,
             };
 
@@ -634,6 +683,9 @@ mod test {
 
             let blockers = indexes.get_blockers(&blocked_keypair.id)?;
             assert!(!blockers.contains(&keypair.id));
+
+            let follows = indexes.get_follows(&keypair.id)?;
+            assert!(follows.contains(&blocked_keypair.id));
         }
 
         Ok(())

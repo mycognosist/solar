@@ -52,6 +52,8 @@ pub struct PubKeyAndSeqNum {
 pub struct KvStorage {
     /// The core database which stores messages and blob references.
     db: Option<sled::Db>,
+    // TODO: Move indexes into a separate module and organise them into a
+    // standalone struct.
     /// Channel subscriber indexes stored in a database tree.
     channel_subscriber_index: Option<sled::Tree>,
     /// Channel subscription indexes stored in a database tree.
@@ -322,7 +324,7 @@ impl KvStorage {
             let content: MessageContent = serde_json::from_value(content_val.to_owned())?;
 
             match content {
-                MessageContent::About { .. } => self.index_about(content)?,
+                MessageContent::About { .. } => self.index_about(author, content)?,
                 MessageContent::Channel {
                     channel,
                     subscribed,
@@ -339,7 +341,7 @@ impl KvStorage {
     // was created by. Ie. is it self-description (updating one's own profile)
     // or description of another?
     /// Index the content of an about-type message.
-    fn index_about(&self, msg_content: MessageContent) -> Result<()> {
+    fn index_about(&self, user_id: &str, msg_content: MessageContent) -> Result<()> {
         // Match on each field of an about-type message and call each individual
         // indexer as required. This allows us to catch the possibility that
         // multiple fields are set in a single message (such as name and
@@ -353,13 +355,13 @@ impl KvStorage {
         } = msg_content
         {
             if let Some(description) = description {
-                self.index_description(&about, description)?
+                self.index_description(user_id, &about, description)?
             }
             if let Some(image) = image {
-                self.index_image(&about, image)?
+                self.index_image(user_id, &about, image)?
             }
             if let Some(name) = name {
-                self.index_name(&about, name)?
+                self.index_name(user_id, &about, name)?
             }
         }
 
@@ -450,22 +452,27 @@ impl KvStorage {
 
     /// Add the given description to the description index for the associated
     /// public key.
-    fn index_description(&self, user_id: &str, description: String) -> Result<()> {
+    fn index_description(
+        &self,
+        author_id: &str,
+        about_id: &str,
+        description: String,
+    ) -> Result<()> {
         let description_index = self.description_index.as_ref().unwrap();
-        let mut descriptions = self.get_descriptions(user_id)?;
-        descriptions.push(description);
-        description_index.insert(user_id, serde_cbor::to_vec(&descriptions)?)?;
+        let mut descriptions = self.get_descriptions(about_id)?;
+        descriptions.push((author_id.to_owned(), description));
+        description_index.insert(about_id, serde_cbor::to_vec(&descriptions)?)?;
 
         Ok(())
     }
 
     /// Return all indexed descriptions for the given public key.
-    fn get_descriptions(&self, user_id: &str) -> Result<Vec<String>> {
+    fn get_descriptions(&self, user_id: &str) -> Result<Vec<(String, String)>> {
         let description_index = self.description_index.as_ref().unwrap();
 
         // Return and deserialize the descriptions indexed by the given SSB ID.
         let descriptions = if let Some(raw) = description_index.get(user_id)? {
-            serde_cbor::from_slice::<Vec<String>>(&raw)?
+            serde_cbor::from_slice::<Vec<(String, String)>>(&raw)?
         } else {
             Vec::new()
         };
@@ -473,36 +480,56 @@ impl KvStorage {
         Ok(descriptions)
     }
 
+    /// Return all indexed self-assigned descriptions for the given public key.
+    fn get_self_assigned_descriptions(&self, user_id: &str) -> Result<Vec<(String, String)>> {
+        let mut descriptions = self.get_descriptions(user_id)?;
+        descriptions.retain(|(author, _description)| author == user_id);
+
+        Ok(descriptions)
+    }
+
     /// Return the most recently indexed description for the given public key.
-    fn get_description(&self, user_id: &str) -> Result<Option<String>> {
+    fn get_latest_description(&self, user_id: &str) -> Result<Option<(String, String)>> {
         let descriptions = self.get_descriptions(user_id)?;
         let description = descriptions.last().cloned();
 
         Ok(description)
     }
 
+    /// Return the most recently indexed self-assigned description for the given
+    /// public key.
+    fn get_latest_self_assigned_description(
+        &self,
+        user_id: &str,
+    ) -> Result<Option<(String, String)>> {
+        let self_descriptions = self.get_self_assigned_descriptions(user_id)?;
+        let description = self_descriptions.last().cloned();
+
+        Ok(description)
+    }
+
     /// Add the given image reference to the image index for the associated
     /// public key.
-    fn index_image(&self, user_id: &str, image: Image) -> Result<()> {
+    fn index_image(&self, author_id: &str, about_id: &str, image: Image) -> Result<()> {
         // TODO: Handle `Image::Complete { .. }` variant.
         if let Image::OnlyLink(ssb_hash) = image {
             let image_index = self.image_index.as_ref().unwrap();
-            let mut images = self.get_images(user_id)?;
-            images.push(ssb_hash);
-            image_index.insert(user_id, serde_cbor::to_vec(&images)?)?;
+            let mut images = self.get_images(about_id)?;
+            images.push((author_id.to_owned(), ssb_hash));
+            image_index.insert(about_id, serde_cbor::to_vec(&images)?)?;
         }
 
         Ok(())
     }
 
     /// Return all indexed image references for the given public key.
-    fn get_images(&self, user_id: &str) -> Result<Vec<String>> {
+    fn get_images(&self, user_id: &str) -> Result<Vec<(String, String)>> {
         let image_index = self.image_index.as_ref().unwrap();
 
         // Return and deserialize the image references indexed by the given
         // SSB ID.
         let images = if let Some(raw) = image_index.get(user_id)? {
-            serde_cbor::from_slice::<Vec<String>>(&raw)?
+            serde_cbor::from_slice::<Vec<(String, String)>>(&raw)?
         } else {
             Vec::new()
         };
@@ -510,33 +537,51 @@ impl KvStorage {
         Ok(images)
     }
 
+    /// Return all indexed self-assigned image references for the given public
+    /// key.
+    fn get_self_assigned_images(&self, user_id: &str) -> Result<Vec<(String, String)>> {
+        let mut images = self.get_images(user_id)?;
+        images.retain(|(author, _image)| author == user_id);
+
+        Ok(images)
+    }
+
     /// Return the most recently indexed image reference for the given public
     /// key.
-    fn get_image(&self, user_id: &str) -> Result<Option<String>> {
+    fn get_latest_image(&self, user_id: &str) -> Result<Option<(String, String)>> {
         let images = self.get_images(user_id)?;
         let image = images.last().cloned();
 
         Ok(image)
     }
 
+    /// Return the most recently indexed self-assigned image reference for the
+    /// given public key.
+    fn get_latest_self_assigned_image(&self, user_id: &str) -> Result<Option<(String, String)>> {
+        let images = self.get_self_assigned_images(user_id)?;
+        let image = images.last().cloned();
+
+        Ok(image)
+    }
+
     /// Add the given name to the name index for the associated public key.
-    fn index_name(&self, user_id: &str, name: String) -> Result<()> {
+    fn index_name(&self, author_id: &str, about_id: &str, name: String) -> Result<()> {
         // TODO: Do we also want to store the hash of the associated message?
         let name_index = self.name_index.as_ref().unwrap();
-        let mut names = self.get_names(user_id)?;
-        names.push(name);
-        name_index.insert(user_id, serde_cbor::to_vec(&names)?)?;
+        let mut names = self.get_names(about_id)?;
+        names.push((author_id.to_owned(), name));
+        name_index.insert(about_id, serde_cbor::to_vec(&names)?)?;
 
         Ok(())
     }
 
     /// Return all indexed names for the given public key.
-    fn get_names(&self, user_id: &str) -> Result<Vec<String>> {
+    fn get_names(&self, user_id: &str) -> Result<Vec<(String, String)>> {
         let name_index = self.name_index.as_ref().unwrap();
 
         // Return and deserialize the names indexed by the given SSB ID.
         let names = if let Some(raw) = name_index.get(user_id)? {
-            serde_cbor::from_slice::<Vec<String>>(&raw)?
+            serde_cbor::from_slice::<Vec<(String, String)>>(&raw)?
         } else {
             Vec::new()
         };
@@ -544,9 +589,26 @@ impl KvStorage {
         Ok(names)
     }
 
+    /// Return all indexed self-assigned names for the given public key.
+    fn get_self_assigned_names(&self, user_id: &str) -> Result<Vec<(String, String)>> {
+        let mut names = self.get_names(user_id)?;
+        names.retain(|(author, _image)| author == user_id);
+
+        Ok(names)
+    }
+
     /// Return the most recently indexed name for the given public key.
-    fn get_name(&self, user_id: &str) -> Result<Option<String>> {
+    fn get_latest_name(&self, user_id: &str) -> Result<Option<(String, String)>> {
         let names = self.get_names(user_id)?;
+        let name = names.last().cloned();
+
+        Ok(name)
+    }
+
+    /// Return the most recently indexed self-assigned name for the given public
+    /// key.
+    fn get_latest_self_assigned_name(&self, user_id: &str) -> Result<Option<(String, String)>> {
+        let names = self.get_self_assigned_names(user_id)?;
         let name = names.last().cloned();
 
         Ok(name)

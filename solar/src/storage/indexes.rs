@@ -10,6 +10,8 @@ use crate::Result;
 
 /// Database indexes, each stored in a tree of the main database.
 pub struct Indexes {
+    /// Blocks.
+    blocks: Tree,
     /// Channel subscribers.
     channel_subscribers: Tree,
     /// Channel subscriptions.
@@ -25,6 +27,7 @@ pub struct Indexes {
 impl Indexes {
     /// Instantiate the indexes.
     fn new(
+        blocks: Tree,
         channel_subscribers: Tree,
         channel_subscriptions: Tree,
         descriptions: Tree,
@@ -32,6 +35,7 @@ impl Indexes {
         names: Tree,
     ) -> Self {
         Self {
+            blocks,
             channel_subscribers,
             channel_subscriptions,
             descriptions,
@@ -42,6 +46,7 @@ impl Indexes {
 
     /// Open a database tree for each index.
     pub fn open(db: &Db) -> Result<Indexes> {
+        let blocks = db.open_tree("blocks")?;
         let channel_subscribers = db.open_tree("channel_subscribers")?;
         let channel_subscriptions = db.open_tree("channel_subscriptions")?;
         let descriptions = db.open_tree("descriptions")?;
@@ -49,6 +54,7 @@ impl Indexes {
         let names = db.open_tree("names")?;
 
         let indexes = Indexes::new(
+            blocks,
             channel_subscribers,
             channel_subscriptions,
             descriptions,
@@ -70,9 +76,66 @@ impl Indexes {
                     channel,
                     subscribed,
                 } => self.index_channel(author, channel, subscribed)?,
+                MessageContent::Contact { .. } => self.index_contact(author, content)?,
                 _ => (),
             }
         }
+
+        Ok(())
+    }
+
+    /// Index the content of a contact-type message.
+    fn index_contact(&self, user_id: &str, msg_content: MessageContent) -> Result<()> {
+        if let MessageContent::Contact {
+            contact,
+            blocking,
+            following,
+            ..
+        } = msg_content
+        {
+            if let Some(contact) = contact {
+                if let Some(blocking) = blocking {
+                    self.index_blocking(user_id, contact, blocking)?
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Add the given block to the block indexes.
+    fn index_blocking(&self, user_id: &str, contact: String, blocking: bool) -> Result<()> {
+        self.index_block(user_id, &contact, blocking)?;
+        //self.index_blocker(user_id, &contact, blocking)?;
+
+        Ok(())
+    }
+
+    /// Return the public keys representing all peers blocked by the given
+    /// public key.
+    fn get_blocks(&self, blocker_id: &str) -> Result<HashSet<String>> {
+        let blocks = if let Some(raw) = self.blocks.get(blocker_id)? {
+            serde_cbor::from_slice::<HashSet<String>>(&raw)?
+        } else {
+            HashSet::new()
+        };
+
+        Ok(blocks)
+    }
+
+    /// Update the blocks index for the given blocker ID, blocked ID and block
+    /// state.
+    fn index_block(&self, blocker_id: &str, blocked_id: &str, blocked: bool) -> Result<()> {
+        let mut blocks = self.get_blocks(blocker_id)?;
+
+        if blocked {
+            blocks.insert(blocked_id.to_owned());
+        } else {
+            blocks.remove(blocked_id);
+        }
+
+        self.blocks
+            .insert(blocker_id, serde_cbor::to_vec(&blocks)?)?;
 
         Ok(())
     }
@@ -105,7 +168,7 @@ impl Indexes {
         Ok(())
     }
 
-    /// Add the given channel to the channel index.
+    /// Add the given channel to the channel indexes.
     fn index_channel(&self, user_id: &str, channel: String, subscribed: bool) -> Result<()> {
         self.index_channel_subscriber(user_id, &channel, subscribed)?;
         self.index_channel_subscription(user_id, &channel, subscribed)?;
@@ -449,16 +512,17 @@ mod test {
             let subscribed = true;
 
             // Create a channel-type message which subscribes to a channel.
-            let first_msg_content = TypedMessage::Channel {
+            let subscribe_msg_content = TypedMessage::Channel {
                 channel: channel.to_owned(),
                 subscribed,
             };
 
             let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
-            let first_msg =
-                MessageValue::sign(last_msg.as_ref(), &keypair, json!(first_msg_content)).unwrap();
+            let subscribe_msg =
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(subscribe_msg_content))
+                    .unwrap();
 
-            indexes.index_msg(&keypair.id, first_msg)?;
+            indexes.index_msg(&keypair.id, subscribe_msg)?;
 
             let subscribers = indexes.get_channel_subscribers(&channel)?;
             assert!(subscribers.contains(&keypair.id));
@@ -467,22 +531,68 @@ mod test {
             assert!(subscriptions.contains(&channel));
 
             // Create a channel-type message which unsubscribes to a channel.
-            let second_msg_content = TypedMessage::Channel {
+            let unsubscribe_msg_content = TypedMessage::Channel {
                 channel: channel.to_owned(),
                 subscribed: false,
             };
 
             let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
-            let second_msg =
-                MessageValue::sign(last_msg.as_ref(), &keypair, json!(second_msg_content)).unwrap();
+            let unsubscribe_msg =
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(unsubscribe_msg_content))
+                    .unwrap();
 
-            indexes.index_msg(&keypair.id, second_msg)?;
+            indexes.index_msg(&keypair.id, unsubscribe_msg)?;
 
             let subscribers = indexes.get_channel_subscribers(&channel)?;
             assert!(!subscribers.contains(&keypair.id));
 
             let subscriptions = indexes.get_channel_subscriptions(&keypair.id)?;
             assert!(!subscriptions.contains(&channel));
+        }
+
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn test_contact_indexes() -> Result<()> {
+        let (keypair, kv) = initialise_keypair_and_kv();
+        let blocked_keypair = SecretConfig::create().to_owned_identity().unwrap();
+
+        if let Some(indexes) = kv.indexes.as_ref() {
+            // Create a contact-type message which blocks an ID.
+            let block_msg_content = TypedMessage::Contact {
+                contact: Some(blocked_keypair.id.to_owned()),
+                blocking: Some(true),
+                following: None,
+                autofollow: None,
+            };
+
+            let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+            let block_msg =
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(block_msg_content)).unwrap();
+
+            indexes.index_msg(&keypair.id, block_msg)?;
+
+            let blocks = indexes.get_blocks(&keypair.id)?;
+            assert!(blocks.contains(&blocked_keypair.id));
+
+            // Create a contact-type message which unblocks an ID.
+            let unblock_msg_content = TypedMessage::Contact {
+                contact: Some(blocked_keypair.id.to_owned()),
+                blocking: Some(false),
+                following: None,
+                autofollow: None,
+            };
+
+            let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+            let unblock_msg =
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(unblock_msg_content))
+                    .unwrap();
+
+            indexes.index_msg(&keypair.id, unblock_msg)?;
+
+            let blocks = indexes.get_blocks(&keypair.id)?;
+            assert!(!blocks.contains(&blocked_keypair.id));
         }
 
         Ok(())

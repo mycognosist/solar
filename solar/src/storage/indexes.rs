@@ -369,70 +369,72 @@ mod test {
     #[async_std::test]
     async fn test_about_indexes() -> Result<()> {
         let (keypair, kv) = initialise_keypair_and_kv();
-        // TODO: Handle the unwrap.
-        let indexes = kv.indexes.as_ref().unwrap();
 
-        let first_name = "mycognosist".to_string();
-        let first_description = "just a humble fungi".to_string();
-        let image_ref = "&8M2JFEFHlxJ5q8Lmu3P4bDdCHg0SLB27Q321cy9Upx4=.sha256".to_string();
+        if let Some(indexes) = kv.indexes.as_ref() {
+            let first_name = "mycognosist".to_string();
+            let first_description = "just a humble fungi".to_string();
+            let image_ref = "&8M2JFEFHlxJ5q8Lmu3P4bDdCHg0SLB27Q321cy9Upx4=.sha256".to_string();
 
-        // Create an about-type message which assigns a name.
-        let first_msg_content = TypedMessage::About {
-            about: keypair.id.to_owned(),
-            name: Some(first_name.to_owned()),
-            branch: None,
-            description: Some(first_description.to_owned()),
-            image: Some(Image::OnlyLink(image_ref.to_owned())),
-            location: None,
-            start_datetime: None,
-            title: None,
-        };
+            // Create an about-type message which assigns a name.
+            let first_msg_content = TypedMessage::About {
+                about: keypair.id.to_owned(),
+                name: Some(first_name.to_owned()),
+                branch: None,
+                description: Some(first_description.to_owned()),
+                image: Some(Image::OnlyLink(image_ref.to_owned())),
+                location: None,
+                start_datetime: None,
+                title: None,
+            };
 
-        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
-        let first_msg =
-            MessageValue::sign(last_msg.as_ref(), &keypair, json!(first_msg_content)).unwrap();
+            let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+            let first_msg =
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(first_msg_content)).unwrap();
 
-        indexes.index_msg(&keypair.id, first_msg)?;
+            indexes.index_msg(&keypair.id, first_msg)?;
 
-        if let Some((_author, description)) = indexes.get_latest_description(&keypair.id)? {
-            assert_eq!(description, first_description);
-        }
+            if let Some((_author, description)) = indexes.get_latest_description(&keypair.id)? {
+                assert_eq!(description, first_description);
+            }
 
-        if let Some((_author, image)) = indexes.get_latest_image(&keypair.id)? {
-            assert_eq!(image, image_ref);
-        }
+            if let Some((_author, image)) = indexes.get_latest_image(&keypair.id)? {
+                assert_eq!(image, image_ref);
+            }
 
-        if let Some((_author, name)) = indexes.get_latest_name(&keypair.id)? {
-            assert_eq!(name, first_name);
-        }
+            if let Some((_author, name)) = indexes.get_latest_name(&keypair.id)? {
+                assert_eq!(name, first_name);
+            }
 
-        let second_name = "glyph".to_string();
-        let second_description =
-            "[ sowing seeds of symbiosis | weaving webs of wu wei ]".to_string();
+            let second_name = "glyph".to_string();
+            let second_description =
+                "[ sowing seeds of symbiosis | weaving webs of wu wei ]".to_string();
 
-        let second_msg_content = TypedMessage::About {
-            about: keypair.id.to_owned(),
-            name: Some(second_name.to_owned()),
-            branch: None,
-            description: Some(second_description.to_owned()),
-            image: None,
-            location: None,
-            start_datetime: None,
-            title: None,
-        };
+            let second_msg_content = TypedMessage::About {
+                about: keypair.id.to_owned(),
+                name: Some(second_name.to_owned()),
+                branch: None,
+                description: Some(second_description.to_owned()),
+                image: None,
+                location: None,
+                start_datetime: None,
+                title: None,
+            };
 
-        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
-        let second_msg =
-            MessageValue::sign(last_msg.as_ref(), &keypair, json!(second_msg_content)).unwrap();
+            let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+            let second_msg =
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(second_msg_content)).unwrap();
 
-        indexes.index_msg(&keypair.id, second_msg)?;
+            indexes.index_msg(&keypair.id, second_msg)?;
 
-        if let Some((_author, lastest_name)) = indexes.get_latest_name(&keypair.id)? {
-            assert_eq!(lastest_name, second_name);
-        }
+            if let Some((_author, lastest_name)) = indexes.get_latest_name(&keypair.id)? {
+                assert_eq!(lastest_name, second_name);
+            }
 
-        if let Some((_author, latest_description)) = indexes.get_latest_description(&keypair.id)? {
-            assert_eq!(latest_description, second_description);
+            if let Some((_author, latest_description)) =
+                indexes.get_latest_description(&keypair.id)?
+            {
+                assert_eq!(latest_description, second_description);
+            }
         }
 
         Ok(())
@@ -441,47 +443,47 @@ mod test {
     #[async_std::test]
     async fn test_channel_indexes() -> Result<()> {
         let (keypair, kv) = initialise_keypair_and_kv();
-        // TODO: Handle the unwrap.
-        let indexes = kv.indexes.as_ref().unwrap();
 
-        let channel = "myco".to_string();
-        let subscribed = true;
+        if let Some(indexes) = kv.indexes.as_ref() {
+            let channel = "myco".to_string();
+            let subscribed = true;
 
-        // Create a channel-type message which subscribes to a channel.
-        let first_msg_content = TypedMessage::Channel {
-            channel: channel.to_owned(),
-            subscribed,
-        };
+            // Create a channel-type message which subscribes to a channel.
+            let first_msg_content = TypedMessage::Channel {
+                channel: channel.to_owned(),
+                subscribed,
+            };
 
-        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
-        let first_msg =
-            MessageValue::sign(last_msg.as_ref(), &keypair, json!(first_msg_content)).unwrap();
+            let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+            let first_msg =
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(first_msg_content)).unwrap();
 
-        indexes.index_msg(&keypair.id, first_msg)?;
+            indexes.index_msg(&keypair.id, first_msg)?;
 
-        let subscribers = indexes.get_channel_subscribers(&channel)?;
-        assert!(subscribers.contains(&keypair.id));
+            let subscribers = indexes.get_channel_subscribers(&channel)?;
+            assert!(subscribers.contains(&keypair.id));
 
-        let subscriptions = indexes.get_channel_subscriptions(&keypair.id)?;
-        assert!(subscriptions.contains(&channel));
+            let subscriptions = indexes.get_channel_subscriptions(&keypair.id)?;
+            assert!(subscriptions.contains(&channel));
 
-        // Create a channel-type message which unsubscribes to a channel.
-        let second_msg_content = TypedMessage::Channel {
-            channel: channel.to_owned(),
-            subscribed: false,
-        };
+            // Create a channel-type message which unsubscribes to a channel.
+            let second_msg_content = TypedMessage::Channel {
+                channel: channel.to_owned(),
+                subscribed: false,
+            };
 
-        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
-        let second_msg =
-            MessageValue::sign(last_msg.as_ref(), &keypair, json!(second_msg_content)).unwrap();
+            let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+            let second_msg =
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(second_msg_content)).unwrap();
 
-        indexes.index_msg(&keypair.id, second_msg)?;
+            indexes.index_msg(&keypair.id, second_msg)?;
 
-        let subscribers = indexes.get_channel_subscribers(&channel)?;
-        assert!(!subscribers.contains(&keypair.id));
+            let subscribers = indexes.get_channel_subscribers(&channel)?;
+            assert!(!subscribers.contains(&keypair.id));
 
-        let subscriptions = indexes.get_channel_subscriptions(&keypair.id)?;
-        assert!(!subscriptions.contains(&channel));
+            let subscriptions = indexes.get_channel_subscriptions(&keypair.id)?;
+            assert!(!subscriptions.contains(&channel));
+        }
 
         Ok(())
     }

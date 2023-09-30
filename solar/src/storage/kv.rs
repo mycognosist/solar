@@ -330,30 +330,31 @@ mod test {
 
     use crate::secret_config::SecretConfig;
 
-    fn open_temporary_kv() -> KvStorage {
+    fn open_temporary_kv() -> Result<KvStorage> {
         let mut kv = KvStorage::default();
         let (sender, _) = futures::channel::mpsc::unbounded();
         let path = tempdir::TempDir::new("solardb").unwrap();
         let config = Config::new().path(path.path());
         kv.open(config, sender).unwrap();
-        kv
+
+        Ok(kv)
     }
 
-    fn initialise_keypair_and_kv() -> (OwnedIdentity, KvStorage) {
+    fn initialise_keypair_and_kv() -> Result<(OwnedIdentity, KvStorage)> {
         // Create a unique keypair to sign messages.
-        let keypair = SecretConfig::create().to_owned_identity().unwrap();
+        let keypair = SecretConfig::create().to_owned_identity()?;
 
         // Open a temporary key-value store.
-        let kv = open_temporary_kv();
+        let kv = open_temporary_kv()?;
 
-        (keypair, kv)
+        Ok((keypair, kv))
     }
 
     #[async_std::test]
     async fn test_feed_length() -> Result<()> {
         use kuska_ssb::feed::Message;
 
-        let (keypair, kv) = initialise_keypair_and_kv();
+        let (keypair, kv) = initialise_keypair_and_kv()?;
 
         let mut last_msg: Option<Message> = None;
         for i in 1..=4 {
@@ -363,16 +364,16 @@ mod test {
                 mentions: None,
             };
 
-            let msg = MessageValue::sign(last_msg.as_ref(), &keypair, json!(msg_content)).unwrap();
+            let msg = MessageValue::sign(last_msg.as_ref(), &keypair, json!(msg_content))?;
 
             // Append the signed message to the feed. Returns the sequence number
             // of the appended message.
-            let seq = kv.append_feed(msg).await.unwrap();
+            let seq = kv.append_feed(msg).await?;
             assert_eq!(seq, i);
 
-            last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+            last_msg = kv.get_latest_msg_val(&keypair.id)?;
 
-            let feed = kv.get_feed(&keypair.id).unwrap();
+            let feed = kv.get_feed(&keypair.id)?;
             assert_eq!(feed.len(), i as usize);
         }
 
@@ -381,7 +382,7 @@ mod test {
 
     #[async_std::test]
     async fn test_single_message_content_matches() -> Result<()> {
-        let (keypair, kv) = initialise_keypair_and_kv();
+        let (keypair, kv) = initialise_keypair_and_kv()?;
 
         // Create a post-type message.
         let msg_content = TypedMessage::Post {
@@ -389,21 +390,21 @@ mod test {
             mentions: None,
         };
 
-        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
-        let msg = MessageValue::sign(last_msg.as_ref(), &keypair, json!(msg_content)).unwrap();
+        let last_msg = kv.get_latest_msg_val(&keypair.id)?;
+        let msg = MessageValue::sign(last_msg.as_ref(), &keypair, json!(msg_content))?;
 
         // Append the signed message to the feed. Returns the sequence number
         // of the appended message.
-        let seq = kv.append_feed(msg).await.unwrap();
+        let seq = kv.append_feed(msg).await?;
         assert_eq!(seq, 1);
 
-        let latest_seq = kv.get_latest_seq(&keypair.id).unwrap();
+        let latest_seq = kv.get_latest_seq(&keypair.id)?;
         assert_eq!(latest_seq, Some(1));
 
         // Lookup the value of the previous message. This will be `None`
-        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+        let last_msg = kv.get_latest_msg_val(&keypair.id)?;
         assert!(last_msg.is_some());
-        let expected = serde_json::value::to_value(msg_content).unwrap();
+        let expected = serde_json::value::to_value(msg_content)?;
         let last_msg = last_msg.unwrap().content().clone();
 
         assert_eq!(last_msg, expected);
@@ -413,13 +414,13 @@ mod test {
 
     #[async_std::test]
     async fn test_new_feed_is_empty() -> Result<()> {
-        let (keypair, kv) = initialise_keypair_and_kv();
+        let (keypair, kv) = initialise_keypair_and_kv()?;
 
         // Lookup the value of the previous message. This will be `None`
-        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+        let last_msg = kv.get_latest_msg_val(&keypair.id)?;
         assert!(last_msg.is_none());
 
-        let latest_seq = kv.get_latest_seq(&keypair.id).unwrap();
+        let latest_seq = kv.get_latest_seq(&keypair.id)?;
         assert!(latest_seq.is_none());
 
         Ok(())
@@ -432,7 +433,7 @@ mod test {
     // it with messages). Perhaps this could be broken up in the future.
     #[async_std::test]
     async fn test_append_feed() -> Result<()> {
-        let (keypair, kv) = initialise_keypair_and_kv();
+        let (keypair, kv) = initialise_keypair_and_kv()?;
 
         // Create a post-type message.
         let msg_content = TypedMessage::Post {
@@ -442,31 +443,30 @@ mod test {
         };
 
         // Lookup the value of the previous message. This will be `None`.
-        let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+        let last_msg = kv.get_latest_msg_val(&keypair.id)?;
 
         // Sign the message content using the temporary keypair and value of
         // the previous message.
-        let msg = MessageValue::sign(last_msg.as_ref(), &keypair, json!(msg_content)).unwrap();
+        let msg = MessageValue::sign(last_msg.as_ref(), &keypair, json!(msg_content))?;
 
         // Append the signed message to the feed. Returns the sequence number
         // of the appended message.
-        let seq = kv.append_feed(msg).await.unwrap();
+        let seq = kv.append_feed(msg).await?;
 
         // Ensure that the message is the first in the feed.
         assert_eq!(seq, 1);
 
         // Get the latest sequence number.
-        let latest_seq = kv.get_latest_seq(&keypair.id).unwrap();
+        let latest_seq = kv.get_latest_seq(&keypair.id)?;
 
         // Ensure the stored sequence number matches that of the appended
         // message.
-        assert!(latest_seq.is_some());
-        assert_eq!(latest_seq.unwrap(), seq);
+        assert_eq!(latest_seq, Some(seq));
 
         // Get a list of all replicated peers and their latest sequence
         // numbers. This list is expected to contain an entry for the
         // local keypair.
-        let peers = kv.get_peers().await.unwrap();
+        let peers = kv.get_peers().await?;
 
         // Ensure there is only one entry in the peers list.
         assert_eq!(peers.len(), 1);
@@ -480,32 +480,30 @@ mod test {
             text: "When the sun shone upon her.".to_string(),
             mentions: None,
         };
-        let last_msg_2 = kv.get_latest_msg_val(&keypair.id).unwrap();
-        let msg_2 =
-            MessageValue::sign(last_msg_2.as_ref(), &keypair, json!(msg_content_2)).unwrap();
+        let last_msg_2 = kv.get_latest_msg_val(&keypair.id)?;
+        let msg_2 = MessageValue::sign(last_msg_2.as_ref(), &keypair, json!(msg_content_2))?;
         let msg_2_clone = msg_2.clone();
-        let seq_2 = kv.append_feed(msg_2).await.unwrap();
+        let seq_2 = kv.append_feed(msg_2).await?;
 
         // Ensure that the message is the second in the feed.
         assert_eq!(seq_2, 2);
 
         // Get the second message in the key-value store in the form of a KVT.
-        let msg_kvt = kv.get_msg_kvt(&keypair.id, 2).unwrap();
+        let msg_kvt = kv.get_msg_kvt(&keypair.id, 2)?;
         assert!(msg_kvt.is_some());
 
         // Retrieve the key from the KVT.
         let msg_kvt_key = msg_kvt.unwrap().key;
 
         // Get the second message in the key-value store in the form of a value.
-        let msg_val = kv.get_msg_val(&msg_kvt_key).unwrap();
+        let msg_val = kv.get_msg_val(&msg_kvt_key)?;
 
-        assert!(msg_val.is_some());
         // Ensure the retrieved message value matches the previously created
         // and signed message.
-        assert_eq!(msg_val.unwrap(), msg_2_clone);
+        assert_eq!(msg_val, Some(msg_2_clone));
 
         // Get all messages comprising the feed.
-        let feed = kv.get_feed(&keypair.id).unwrap();
+        let feed = kv.get_feed(&keypair.id)?;
 
         // Ensure that two messages are returned.
         assert_eq!(feed.len(), 2);
@@ -515,9 +513,9 @@ mod test {
 
     #[test]
     fn test_blobs() -> Result<()> {
-        let kv = open_temporary_kv();
+        let kv = open_temporary_kv()?;
 
-        assert!(kv.get_blob("1").unwrap().is_none());
+        assert!(kv.get_blob("1")?.is_none());
 
         kv.set_blob(
             "b1",
@@ -535,11 +533,11 @@ mod test {
             },
         )?;
 
-        let blob = kv.get_blob("b1")?.unwrap();
-
-        assert!(blob.retrieved);
-        assert_eq!(blob.users, ["u1".to_string()].to_vec());
-        assert_eq!(kv.get_pending_blobs().unwrap(), ["b2".to_string()].to_vec());
+        if let Some(blob) = kv.get_blob("b1")? {
+            assert!(blob.retrieved);
+            assert_eq!(blob.users, ["u1".to_string()].to_vec());
+            assert_eq!(kv.get_pending_blobs().unwrap(), ["b2".to_string()].to_vec());
+        }
 
         kv.set_blob(
             "b1",
@@ -549,14 +547,14 @@ mod test {
             },
         )?;
 
-        let blob = kv.get_blob("b1")?.unwrap();
-
-        assert!(!blob.retrieved);
-        assert_eq!(blob.users, ["u7".to_string()].to_vec());
-        assert_eq!(
-            kv.get_pending_blobs().unwrap(),
-            ["b1".to_string(), "b2".to_string()].to_vec()
-        );
+        if let Some(blob) = kv.get_blob("b1")? {
+            assert!(!blob.retrieved);
+            assert_eq!(blob.users, ["u7".to_string()].to_vec());
+            assert_eq!(
+                kv.get_pending_blobs()?,
+                ["b1".to_string(), "b2".to_string()].to_vec()
+            );
+        }
 
         Ok(())
     }

@@ -586,9 +586,9 @@ mod test {
                 title: None,
             };
 
-            let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+            let last_msg = kv.get_latest_msg_val(&keypair.id)?;
             let first_msg =
-                MessageValue::sign(last_msg.as_ref(), &keypair, json!(first_msg_content)).unwrap();
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(first_msg_content))?;
 
             indexes.index_msg(&keypair.id, first_msg)?;
 
@@ -619,9 +619,9 @@ mod test {
                 title: None,
             };
 
-            let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+            let last_msg = kv.get_latest_msg_val(&keypair.id)?;
             let second_msg =
-                MessageValue::sign(last_msg.as_ref(), &keypair, json!(second_msg_content)).unwrap();
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(second_msg_content))?;
 
             indexes.index_msg(&keypair.id, second_msg)?;
 
@@ -653,10 +653,9 @@ mod test {
                 subscribed,
             };
 
-            let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+            let last_msg = kv.get_latest_msg_val(&keypair.id)?;
             let subscribe_msg =
-                MessageValue::sign(last_msg.as_ref(), &keypair, json!(subscribe_msg_content))
-                    .unwrap();
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(subscribe_msg_content))?;
 
             indexes.index_msg(&keypair.id, subscribe_msg)?;
 
@@ -672,10 +671,9 @@ mod test {
                 subscribed: false,
             };
 
-            let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+            let last_msg = kv.get_latest_msg_val(&keypair.id)?;
             let unsubscribe_msg =
-                MessageValue::sign(last_msg.as_ref(), &keypair, json!(unsubscribe_msg_content))
-                    .unwrap();
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(unsubscribe_msg_content))?;
 
             indexes.index_msg(&keypair.id, unsubscribe_msg)?;
 
@@ -703,9 +701,9 @@ mod test {
                 autofollow: None,
             };
 
-            let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+            let last_msg = kv.get_latest_msg_val(&keypair.id)?;
             let block_msg =
-                MessageValue::sign(last_msg.as_ref(), &keypair, json!(block_msg_content)).unwrap();
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(block_msg_content))?;
 
             indexes.index_msg(&keypair.id, block_msg)?;
 
@@ -729,10 +727,9 @@ mod test {
                 autofollow: None,
             };
 
-            let last_msg = kv.get_latest_msg_val(&keypair.id).unwrap();
+            let last_msg = kv.get_latest_msg_val(&keypair.id)?;
             let unblock_msg =
-                MessageValue::sign(last_msg.as_ref(), &keypair, json!(unblock_msg_content))
-                    .unwrap();
+                MessageValue::sign(last_msg.as_ref(), &keypair, json!(unblock_msg_content))?;
 
             indexes.index_msg(&keypair.id, unblock_msg)?;
 
@@ -760,13 +757,12 @@ mod test {
                 autofollow: None,
             };
 
-            let last_msg = kv.get_latest_msg_val(&blocked_keypair.id).unwrap();
+            let last_msg = kv.get_latest_msg_val(&blocked_keypair.id)?;
             let follow_back_msg = MessageValue::sign(
                 last_msg.as_ref(),
                 &blocked_keypair,
                 json!(follow_back_msg_content),
-            )
-            .unwrap();
+            )?;
 
             indexes.index_msg(&blocked_keypair.id, follow_back_msg)?;
 

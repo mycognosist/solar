@@ -22,9 +22,8 @@ lightweight replication and feed storage. Much like
 [scuttlego](https://github.com/planetary-social/scuttlego), this fork is not
 intended to reproduce the full suite of MUXRPC methods used in the JS SSB
 ecosystem. It will only implement the core MUXRPC methods required for 
-message publishing and replication. Indexing of database messages will be
-offloaded to client applications (ie. piping feeds from solar into a SQLite
-database).
+message publishing and replication. Indexes are provided to facilitate client
+creation.
 
 ## Features
 
@@ -38,6 +37,7 @@ database).
  - **Selective replication:** Only replicate with specified peers
  - **JSON-RPC interface:** Interact with the node using JSON-RPC over HTTP
  - **Alternative network key:** Operate with a unique network key
+ - **Database indexes:** Look up state with efficient queries
 
 _¹ - this is possible because those implementations support legacy replication (using `createHistoryStream`)_
 

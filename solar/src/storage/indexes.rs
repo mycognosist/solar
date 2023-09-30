@@ -24,6 +24,8 @@ pub struct Indexes {
     follows: Tree,
     /// Followers.
     followers: Tree,
+    /// Friends.
+    friends: Tree,
     /// Image references.
     images: Tree,
     /// Names.
@@ -31,31 +33,6 @@ pub struct Indexes {
 }
 
 impl Indexes {
-    /// Instantiate the indexes.
-    fn new(
-        blocks: Tree,
-        blockers: Tree,
-        channel_subscribers: Tree,
-        channel_subscriptions: Tree,
-        descriptions: Tree,
-        follows: Tree,
-        followers: Tree,
-        images: Tree,
-        names: Tree,
-    ) -> Self {
-        Self {
-            blocks,
-            blockers,
-            channel_subscribers,
-            channel_subscriptions,
-            descriptions,
-            follows,
-            followers,
-            images,
-            names,
-        }
-    }
-
     /// Open a database tree for each index.
     pub fn open(db: &Db) -> Result<Indexes> {
         let blocks = db.open_tree("blocks")?;
@@ -65,10 +42,11 @@ impl Indexes {
         let descriptions = db.open_tree("descriptions")?;
         let follows = db.open_tree("follows")?;
         let followers = db.open_tree("followers")?;
+        let friends = db.open_tree("friends")?;
         let images = db.open_tree("images")?;
         let names = db.open_tree("names")?;
 
-        let indexes = Indexes::new(
+        let indexes = Indexes {
             blocks,
             blockers,
             channel_subscribers,
@@ -76,9 +54,10 @@ impl Indexes {
             descriptions,
             follows,
             followers,
+            friends,
             images,
             names,
-        );
+        };
 
         Ok(indexes)
     }
@@ -273,19 +252,17 @@ impl Indexes {
     /// Index the content of a contact-type message.
     fn index_contact(&self, user_id: &str, msg_content: MessageContent) -> Result<()> {
         if let MessageContent::Contact {
-            contact,
+            contact: Some(contact),
             blocking,
             following,
             ..
         } = msg_content
         {
-            if let Some(contact) = contact {
-                if let Some(blocking) = blocking {
-                    self.index_blocking(user_id, &contact, blocking)?
-                }
-                if let Some(following) = following {
-                    self.index_following(user_id, &contact, following)?
-                }
+            if let Some(blocking) = blocking {
+                self.index_blocking(user_id, &contact, blocking)?
+            }
+            if let Some(following) = following {
+                self.index_following(user_id, &contact, following)?
             }
         }
 
@@ -351,6 +328,7 @@ impl Indexes {
     fn index_following(&self, user_id: &str, contact: &str, following: bool) -> Result<()> {
         self.index_follow(user_id, contact, following)?;
         self.index_follower(user_id, contact, following)?;
+        self.index_friend(user_id, contact)?;
 
         Ok(())
     }
@@ -411,6 +389,47 @@ impl Indexes {
         };
 
         Ok(followers)
+    }
+
+    /// Query whether or not the first given public key follows the second.
+    fn is_following(&self, user_id: &str, peer_id: &str) -> Result<bool> {
+        let follows = self.get_follows(user_id)?;
+        let following = follows.contains(peer_id);
+
+        Ok(following)
+    }
+
+    /// Update the friends index for the given pair of peers.
+    fn index_friend(&self, peer_a: &str, peer_b: &str) -> Result<()> {
+        let mut peer_a_friends = self.get_friends(peer_a)?;
+        let mut peer_b_friends = self.get_friends(peer_b)?;
+
+        if self.is_following(peer_a, peer_b)? && self.is_following(peer_b, peer_a)? {
+            peer_a_friends.insert(peer_b.to_owned());
+            peer_b_friends.insert(peer_a.to_owned());
+        } else {
+            peer_a_friends.remove(peer_b);
+            peer_b_friends.remove(peer_a);
+        }
+
+        self.friends
+            .insert(peer_a, serde_cbor::to_vec(&peer_a_friends)?)?;
+        self.friends
+            .insert(peer_b, serde_cbor::to_vec(&peer_b_friends)?)?;
+
+        Ok(())
+    }
+
+    /// Return the public keys representing all the friends (mutual follows)
+    /// of the given public key.
+    fn get_friends(&self, ssb_id: &str) -> Result<HashSet<String>> {
+        let friends = if let Some(raw) = self.friends.get(ssb_id)? {
+            serde_cbor::from_slice::<HashSet<String>>(&raw)?
+        } else {
+            HashSet::new()
+        };
+
+        Ok(friends)
     }
 
     /// Add the given image reference to the image index for the associated
@@ -727,6 +746,32 @@ mod test {
 
             let followers = indexes.get_followers(&blocked_keypair.id)?;
             assert!(followers.contains(&keypair.id));
+
+            let friends = indexes.get_friends(&keypair.id)?;
+            assert!(!friends.contains(&blocked_keypair.id));
+
+            // Create a contact-type message which defines a follow of the
+            // initial keypair by the second keypair.
+            let follow_back_msg_content = TypedMessage::Contact {
+                contact: Some(keypair.id.to_owned()),
+                blocking: Some(false),
+                following: Some(true),
+                autofollow: None,
+            };
+
+            let last_msg = kv.get_latest_msg_val(&blocked_keypair.id).unwrap();
+            let follow_back_msg = MessageValue::sign(
+                last_msg.as_ref(),
+                &blocked_keypair,
+                json!(follow_back_msg_content),
+            )
+            .unwrap();
+
+            indexes.index_msg(&blocked_keypair.id, follow_back_msg)?;
+
+            // The peers should now be friends (mutual followers).
+            let friends = indexes.get_friends(&keypair.id)?;
+            assert!(friends.contains(&blocked_keypair.id));
         }
 
         Ok(())

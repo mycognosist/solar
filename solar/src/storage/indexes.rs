@@ -135,7 +135,7 @@ impl Indexes {
 
     /// Return the public keys representing all peers blocked by the given
     /// public key.
-    fn get_blocks(&self, ssb_id: &str) -> Result<HashSet<String>> {
+    pub fn get_blocks(&self, ssb_id: &str) -> Result<HashSet<String>> {
         let blocks = if let Some(raw) = self.blocks.get(ssb_id)? {
             serde_cbor::from_slice::<HashSet<String>>(&raw)?
         } else {
@@ -164,7 +164,7 @@ impl Indexes {
 
     /// Return the public keys representing all peers blocking the given
     /// public key.
-    fn get_blockers(&self, ssb_id: &str) -> Result<HashSet<String>> {
+    pub fn get_blockers(&self, ssb_id: &str) -> Result<HashSet<String>> {
         let blockers = if let Some(raw) = self.blockers.get(ssb_id)? {
             serde_cbor::from_slice::<HashSet<String>>(&raw)?
         } else {
@@ -205,7 +205,7 @@ impl Indexes {
     }
 
     /// Return all subscribers of the given channel.
-    fn get_channel_subscribers(&self, channel: &str) -> Result<HashSet<String>> {
+    pub fn get_channel_subscribers(&self, channel: &str) -> Result<HashSet<String>> {
         let subscribers = if let Some(raw) = self.channel_subscribers.get(channel)? {
             serde_cbor::from_slice::<HashSet<String>>(&raw)?
         } else {
@@ -238,7 +238,7 @@ impl Indexes {
     }
 
     /// Return all the channel subscriptions for the given public key.
-    fn get_channel_subscriptions(&self, ssb_id: &str) -> Result<HashSet<String>> {
+    pub fn get_channel_subscriptions(&self, ssb_id: &str) -> Result<HashSet<String>> {
         let subscriptions = if let Some(raw) = self.channel_subscriptions.get(ssb_id)? {
             serde_cbor::from_slice::<HashSet<String>>(&raw)?
         } else {
@@ -285,7 +285,7 @@ impl Indexes {
     }
 
     /// Return all indexed descriptions for the given public key.
-    fn get_descriptions(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
+    pub fn get_descriptions(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
         let descriptions = if let Some(raw) = self.descriptions.get(ssb_id)? {
             serde_cbor::from_slice::<Vec<(String, String)>>(&raw)?
         } else {
@@ -296,7 +296,7 @@ impl Indexes {
     }
 
     /// Return all indexed self-assigned descriptions for the given public key.
-    fn get_self_assigned_descriptions(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
+    pub fn get_self_assigned_descriptions(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
         let mut descriptions = self.get_descriptions(ssb_id)?;
         descriptions.retain(|(author, _description)| author == ssb_id);
 
@@ -304,7 +304,7 @@ impl Indexes {
     }
 
     /// Return the most recently indexed description for the given public key.
-    fn get_latest_description(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
+    pub fn get_latest_description(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
         let descriptions = self.get_descriptions(ssb_id)?;
         let description = descriptions.last().cloned();
 
@@ -313,7 +313,7 @@ impl Indexes {
 
     /// Return the most recently indexed self-assigned description for the given
     /// public key.
-    fn get_latest_self_assigned_description(
+    pub fn get_latest_self_assigned_description(
         &self,
         ssb_id: &str,
     ) -> Result<Option<(String, String)>> {
@@ -351,7 +351,7 @@ impl Indexes {
 
     /// Return the public keys representing all peers followed by the given
     /// public key.
-    fn get_follows(&self, ssb_id: &str) -> Result<HashSet<String>> {
+    pub fn get_follows(&self, ssb_id: &str) -> Result<HashSet<String>> {
         let follows = if let Some(raw) = self.follows.get(ssb_id)? {
             serde_cbor::from_slice::<HashSet<String>>(&raw)?
         } else {
@@ -380,7 +380,7 @@ impl Indexes {
 
     /// Return the public keys representing all peers who follow the given
     /// public key.
-    fn get_followers(&self, ssb_id: &str) -> Result<HashSet<String>> {
+    pub fn get_followers(&self, ssb_id: &str) -> Result<HashSet<String>> {
         let followers = if let Some(raw) = self.followers.get(ssb_id)? {
             serde_cbor::from_slice::<HashSet<String>>(&raw)?
         } else {
@@ -391,7 +391,7 @@ impl Indexes {
     }
 
     /// Query whether or not the first given public key follows the second.
-    fn is_following(&self, peer_a: &str, peer_b: &str) -> Result<bool> {
+    pub fn is_following(&self, peer_a: &str, peer_b: &str) -> Result<bool> {
         let follows = self.get_follows(peer_a)?;
         let following = follows.contains(peer_b);
 
@@ -421,7 +421,7 @@ impl Indexes {
 
     /// Return the public keys representing all the friends (mutual follows)
     /// of the given public key.
-    fn get_friends(&self, ssb_id: &str) -> Result<HashSet<String>> {
+    pub fn get_friends(&self, ssb_id: &str) -> Result<HashSet<String>> {
         let friends = if let Some(raw) = self.friends.get(ssb_id)? {
             serde_cbor::from_slice::<HashSet<String>>(&raw)?
         } else {
@@ -445,7 +445,7 @@ impl Indexes {
     }
 
     /// Return all indexed image references for the given public key.
-    fn get_images(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
+    pub fn get_images(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
         let images = if let Some(raw) = self.images.get(ssb_id)? {
             serde_cbor::from_slice::<Vec<(String, String)>>(&raw)?
         } else {
@@ -457,7 +457,7 @@ impl Indexes {
 
     /// Return all indexed self-assigned image references for the given public
     /// key.
-    fn get_self_assigned_images(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
+    pub fn get_self_assigned_images(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
         let mut images = self.get_images(ssb_id)?;
         images.retain(|(author, _image)| author == ssb_id);
 
@@ -466,7 +466,7 @@ impl Indexes {
 
     /// Return the most recently indexed image reference for the given public
     /// key.
-    fn get_latest_image(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
+    pub fn get_latest_image(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
         let images = self.get_images(ssb_id)?;
         let image = images.last().cloned();
 
@@ -475,7 +475,7 @@ impl Indexes {
 
     /// Return the most recently indexed self-assigned image reference for the
     /// given public key.
-    fn get_latest_self_assigned_image(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
+    pub fn get_latest_self_assigned_image(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
         let images = self.get_self_assigned_images(ssb_id)?;
         let image = images.last().cloned();
 
@@ -493,7 +493,7 @@ impl Indexes {
     }
 
     /// Return all indexed names for the given public key.
-    fn get_names(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
+    pub fn get_names(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
         let names = if let Some(raw) = self.names.get(ssb_id)? {
             serde_cbor::from_slice::<Vec<(String, String)>>(&raw)?
         } else {
@@ -504,7 +504,7 @@ impl Indexes {
     }
 
     /// Return all indexed self-assigned names for the given public key.
-    fn get_self_assigned_names(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
+    pub fn get_self_assigned_names(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
         let mut names = self.get_names(ssb_id)?;
         names.retain(|(author, _image)| author == ssb_id);
 
@@ -512,7 +512,7 @@ impl Indexes {
     }
 
     /// Return the most recently indexed name for the given public key.
-    fn get_latest_name(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
+    pub fn get_latest_name(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
         let names = self.get_names(ssb_id)?;
         let name = names.last().cloned();
 
@@ -521,7 +521,7 @@ impl Indexes {
 
     /// Return the most recently indexed self-assigned name for the given public
     /// key.
-    fn get_latest_self_assigned_name(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
+    pub fn get_latest_self_assigned_name(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
         let names = self.get_self_assigned_names(ssb_id)?;
         let name = names.last().cloned();
 

@@ -225,6 +225,23 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
         })
     })?;
 
+    // Retrieve the image references for the given public key.
+    //
+    // Returns an array of strings.
+    rpc_module.register_method("images", move |params: Params, _| {
+        task::block_on(async {
+            let pub_key: PubKey = params.parse()?;
+
+            let db = KV_STORE.read().await;
+
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let images = indexes.get_images(&pub_key.0)?;
+            let response = json!(images);
+
+            Ok::<Value, JsonRpcError>(response)
+        })
+    })?;
+
     // Retrieve the public keys of all feeds subscribed to the given channel.
     //
     // Returns an array of public keys.

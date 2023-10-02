@@ -125,13 +125,35 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
             let db = KV_STORE.read().await;
 
             if let Some(indexes) = &db.indexes {
-                let self_descriptions = indexes.get_self_assigned_descriptions(&pub_key.0)?;
-                let response = json!(self_descriptions);
+                let descriptions = indexes.get_self_assigned_descriptions(&pub_key.0)?;
+                let response = json!(descriptions);
 
                 Ok::<Value, JsonRpcError>(response)
             } else {
                 let empty_vec: Vec<String> = Vec::new();
                 let response = json!(empty_vec);
+
+                Ok::<Value, JsonRpcError>(response)
+            }
+        })
+    })?;
+
+    // Retrieve the latest (most-recent) description for the given public key.
+    //
+    // Returns a string.
+    rpc_module.register_method("latest_description", move |params: Params, _| {
+        task::block_on(async {
+            let pub_key: PubKey = params.parse()?;
+
+            let db = KV_STORE.read().await;
+
+            if let Some(indexes) = &db.indexes {
+                let description = indexes.get_latest_description(&pub_key.0)?;
+                let response = json!(description);
+
+                Ok::<Value, JsonRpcError>(response)
+            } else {
+                let response = json!(String::new());
 
                 Ok::<Value, JsonRpcError>(response)
             }

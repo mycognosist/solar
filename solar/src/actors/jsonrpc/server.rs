@@ -160,6 +160,29 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
         })
     })?;
 
+    // Retrieve the latest (most-recent) self-assigned description for the given
+    // public key.
+    //
+    // Returns a string.
+    rpc_module.register_method("latest_self_description", move |params: Params, _| {
+        task::block_on(async {
+            let pub_key: PubKey = params.parse()?;
+
+            let db = KV_STORE.read().await;
+
+            if let Some(indexes) = &db.indexes {
+                let description = indexes.get_latest_self_assigned_description(&pub_key.0)?;
+                let response = json!(description);
+
+                Ok::<Value, JsonRpcError>(response)
+            } else {
+                let response = json!(String::new());
+
+                Ok::<Value, JsonRpcError>(response)
+            }
+        })
+    })?;
+
     // Retrieve the public keys of all feeds subscribed to the given channel.
     //
     // Returns an array of public keys.

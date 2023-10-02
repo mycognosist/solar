@@ -23,6 +23,8 @@ pub enum Error {
     DeserializeToml(de::Error),
     /// Failed to send message on futures channel.
     FuturesChannel(mpsc::SendError),
+    /// Database indexes.
+    Indexes,
     /// Validation error; invalid message sequence number.
     InvalidSequence,
     /// io::Error.
@@ -67,6 +69,7 @@ impl fmt::Display for Error {
             Error::FuturesChannel(err) => {
                 write!(f, "Failed to send message on futures channel: {err}")
             }
+            Error::Indexes => write!(f, "Indexes error: indexes not initialised"),
             // TODO: Attach context so we know the identity of the offending message.
             Error::InvalidSequence => write!(
                 f,
@@ -206,6 +209,7 @@ impl From<Error> for JsonRpcErrorOwned {
             Error::Validation(err_msg) => {
                 JsonRpcErrorOwned::owned(-32002, SERVER_ERROR_MSG, Some(err_msg.to_string()))
             }
+            Error::Indexes => JsonRpcErrorOwned::owned(-32003, SERVER_ERROR_MSG, None::<String>),
             _ => todo!(),
         }
     }

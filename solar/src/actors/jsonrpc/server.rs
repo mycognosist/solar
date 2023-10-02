@@ -23,6 +23,13 @@ struct MsgRef(String);
 #[derive(Debug, Deserialize)]
 struct PubKey(String);
 
+/// The public keys (ID) of two peers.
+#[derive(Debug, Deserialize)]
+struct IsFollowing {
+    peer_a: String,
+    peer_b: String,
+}
+
 /// Register the JSON-RPC server endpoint, define the JSON-RPC methods
 /// and spawn the server.
 ///
@@ -55,17 +62,11 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
             // Open the primary KV database for reading.
             let db = KV_STORE.read().await;
 
-            if let Some(indexes) = &db.indexes {
-                let blocks = indexes.get_blocks(&pub_key.0)?;
-                let response = json!(blocks);
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let blocks = indexes.get_blocks(&pub_key.0)?;
+            let response = json!(blocks);
 
-                Ok::<Value, JsonRpcError>(response)
-            } else {
-                let empty_vec: Vec<String> = Vec::new();
-                let response = json!(empty_vec);
-
-                Ok::<Value, JsonRpcError>(response)
-            }
+            Ok::<Value, JsonRpcError>(response)
         })
     })?;
 
@@ -78,17 +79,11 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
 
             let db = KV_STORE.read().await;
 
-            if let Some(indexes) = &db.indexes {
-                let blockers = indexes.get_blockers(&pub_key.0)?;
-                let response = json!(blockers);
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let blockers = indexes.get_blockers(&pub_key.0)?;
+            let response = json!(blockers);
 
-                Ok::<Value, JsonRpcError>(response)
-            } else {
-                let empty_vec: Vec<String> = Vec::new();
-                let response = json!(empty_vec);
-
-                Ok::<Value, JsonRpcError>(response)
-            }
+            Ok::<Value, JsonRpcError>(response)
         })
     })?;
 
@@ -101,17 +96,11 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
 
             let db = KV_STORE.read().await;
 
-            if let Some(indexes) = &db.indexes {
-                let descriptions = indexes.get_descriptions(&pub_key.0)?;
-                let response = json!(descriptions);
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let descriptions = indexes.get_descriptions(&pub_key.0)?;
+            let response = json!(descriptions);
 
-                Ok::<Value, JsonRpcError>(response)
-            } else {
-                let empty_vec: Vec<String> = Vec::new();
-                let response = json!(empty_vec);
-
-                Ok::<Value, JsonRpcError>(response)
-            }
+            Ok::<Value, JsonRpcError>(response)
         })
     })?;
 
@@ -124,17 +113,11 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
 
             let db = KV_STORE.read().await;
 
-            if let Some(indexes) = &db.indexes {
-                let descriptions = indexes.get_self_assigned_descriptions(&pub_key.0)?;
-                let response = json!(descriptions);
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let descriptions = indexes.get_self_assigned_descriptions(&pub_key.0)?;
+            let response = json!(descriptions);
 
-                Ok::<Value, JsonRpcError>(response)
-            } else {
-                let empty_vec: Vec<String> = Vec::new();
-                let response = json!(empty_vec);
-
-                Ok::<Value, JsonRpcError>(response)
-            }
+            Ok::<Value, JsonRpcError>(response)
         })
     })?;
 
@@ -147,16 +130,11 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
 
             let db = KV_STORE.read().await;
 
-            if let Some(indexes) = &db.indexes {
-                let description = indexes.get_latest_description(&pub_key.0)?;
-                let response = json!(description);
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let description = indexes.get_latest_description(&pub_key.0)?;
+            let response = json!(description);
 
-                Ok::<Value, JsonRpcError>(response)
-            } else {
-                let response = json!(String::new());
-
-                Ok::<Value, JsonRpcError>(response)
-            }
+            Ok::<Value, JsonRpcError>(response)
         })
     })?;
 
@@ -170,16 +148,11 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
 
             let db = KV_STORE.read().await;
 
-            if let Some(indexes) = &db.indexes {
-                let description = indexes.get_latest_self_assigned_description(&pub_key.0)?;
-                let response = json!(description);
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let description = indexes.get_latest_self_assigned_description(&pub_key.0)?;
+            let response = json!(description);
 
-                Ok::<Value, JsonRpcError>(response)
-            } else {
-                let response = json!(String::new());
-
-                Ok::<Value, JsonRpcError>(response)
-            }
+            Ok::<Value, JsonRpcError>(response)
         })
     })?;
 
@@ -192,17 +165,11 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
 
             let db = KV_STORE.read().await;
 
-            if let Some(indexes) = &db.indexes {
-                let follows = indexes.get_follows(&pub_key.0)?;
-                let response = json!(follows);
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let follows = indexes.get_follows(&pub_key.0)?;
+            let response = json!(follows);
 
-                Ok::<Value, JsonRpcError>(response)
-            } else {
-                let empty_vec: Vec<String> = Vec::new();
-                let response = json!(empty_vec);
-
-                Ok::<Value, JsonRpcError>(response)
-            }
+            Ok::<Value, JsonRpcError>(response)
         })
     })?;
 
@@ -215,17 +182,28 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
 
             let db = KV_STORE.read().await;
 
-            if let Some(indexes) = &db.indexes {
-                let followers = indexes.get_followers(&pub_key.0)?;
-                let response = json!(followers);
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let followers = indexes.get_followers(&pub_key.0)?;
+            let response = json!(followers);
 
-                Ok::<Value, JsonRpcError>(response)
-            } else {
-                let empty_vec: Vec<String> = Vec::new();
-                let response = json!(empty_vec);
+            Ok::<Value, JsonRpcError>(response)
+        })
+    })?;
 
-                Ok::<Value, JsonRpcError>(response)
-            }
+    // Retrieve the follow state of two peers (ie. does peer A follow peer B?).
+    //
+    // Returns a boolean.
+    rpc_module.register_method("is_following", move |params: Params, _| {
+        task::block_on(async {
+            let peers: IsFollowing = params.parse()?;
+
+            let db = KV_STORE.read().await;
+
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let is_following = indexes.is_following(&peers.peer_a, &peers.peer_b)?;
+            let response = json!(is_following);
+
+            Ok::<Value, JsonRpcError>(response)
         })
     })?;
 
@@ -238,17 +216,11 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
 
             let db = KV_STORE.read().await;
 
-            if let Some(indexes) = &db.indexes {
-                let subscribers = indexes.get_channel_subscribers(&pub_key.0)?;
-                let response = json!(subscribers);
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let subscribers = indexes.get_channel_subscribers(&pub_key.0)?;
+            let response = json!(subscribers);
 
-                Ok::<Value, JsonRpcError>(response)
-            } else {
-                let empty_vec: Vec<String> = Vec::new();
-                let response = json!(empty_vec);
-
-                Ok::<Value, JsonRpcError>(response)
-            }
+            Ok::<Value, JsonRpcError>(response)
         })
     })?;
 
@@ -261,17 +233,11 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
 
             let db = KV_STORE.read().await;
 
-            if let Some(indexes) = &db.indexes {
-                let subscriptions = indexes.get_channel_subscriptions(&pub_key.0)?;
-                let response = json!(subscriptions);
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let subscriptions = indexes.get_channel_subscriptions(&pub_key.0)?;
+            let response = json!(subscriptions);
 
-                Ok::<Value, JsonRpcError>(response)
-            } else {
-                let empty_vec: Vec<String> = Vec::new();
-                let response = json!(empty_vec);
-
-                Ok::<Value, JsonRpcError>(response)
-            }
+            Ok::<Value, JsonRpcError>(response)
         })
     })?;
 

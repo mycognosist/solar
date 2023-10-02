@@ -92,6 +92,29 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
         })
     })?;
 
+    // Retrieve the descriptions for the given public key.
+    //
+    // Returns an array of descriptions.
+    rpc_module.register_method("descriptions", move |params: Params, _| {
+        task::block_on(async {
+            let pub_key: PubKey = params.parse()?;
+
+            let db = KV_STORE.read().await;
+
+            if let Some(indexes) = &db.indexes {
+                let descriptions = indexes.get_descriptions(&pub_key.0)?;
+                let response = json!(descriptions);
+
+                Ok::<Value, JsonRpcError>(response)
+            } else {
+                let empty_vec: Vec<String> = Vec::new();
+                let response = json!(empty_vec);
+
+                Ok::<Value, JsonRpcError>(response)
+            }
+        })
+    })?;
+
     // Retrieve the public keys of all feeds subscribed to the given channel.
     //
     // Returns an array of public keys.

@@ -4,7 +4,7 @@ A minimal, embeddable Secure Scuttlebutt node capable of lightweight replication
 
 :warning: **Solar is alpha software; expect breaking changes** :construction:
 
-[Features](#features) | [Development](#development) | [Configuration](#configuration) | [JSON-RPC API](#json-rpc) | [License](#license)
+[Features](#features) | [Development](#development) | [Configuration](#configuration) | [JSON-RPC API](#json-rpc) | [Indexes](#indexes) | [License](#license)
 
 ## Features
 
@@ -18,6 +18,7 @@ A minimal, embeddable Secure Scuttlebutt node capable of lightweight replication
  - **Selective replication:** Only replicate with specified peers
  - **JSON-RPC interface:** Interact with the node using JSON-RPC over HTTP
  - **Alternative network key:** Operate with a unique network key
+ - **Database indexes:** Look up state with efficient queries
 
 _¹ - this is possible because those implementations support legacy replication (using `createHistoryStream`)_
 
@@ -98,6 +99,10 @@ _Note: You might find it easier to save your JSON to file and pass that to `curl
 ```
 curl -X POST -H "Content-Type: application/json" --data @publish.json 127.0.0.1:3030
 ```
+
+## Indexes
+
+Database indexes are provided to allow efficient queries of the underlying data. The indexes cover most of the message types commonly of relevance to client development. See the tests in the `indexes` module for usage examples (`solar/src/storage/indexes.rs`).
 
 ## License
 

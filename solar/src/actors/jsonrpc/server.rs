@@ -17,15 +17,11 @@ use crate::{broker::*, error::Error, node::KV_STORE, Result};
 /// Used to parse the key from the parameters supplied to the `message`
 /// endpoint.
 #[derive(Debug, Deserialize)]
-struct MsgRef {
-    msg_ref: String,
-}
+struct MsgRef(String);
 
 /// The public key (ID) of a peer.
 #[derive(Debug, Deserialize)]
-struct PubKey {
-    pub_key: String,
-}
+struct PubKey(String);
 
 /// Register the JSON-RPC server endpoint, define the JSON-RPC methods
 /// and spawn the server.
@@ -48,6 +44,32 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
 
     let mut rpc_module = RpcModule::new(());
 
+    // Retrieve the public keys of all feeds blocked by the given public key.
+    //
+    // Returns an array of public keys.
+    rpc_module.register_method("blocks", move |params: Params, _| {
+        task::block_on(async {
+            // Parse the parameter containing the public key.
+            let pub_key: PubKey = params.parse()?;
+
+            // Open the primary KV database for reading.
+            let db = KV_STORE.read().await;
+
+            if let Some(indexes) = &db.indexes {
+                // Retrieve the message value for the requested message.
+                let blocks = indexes.get_blocks(&pub_key.0)?;
+                let response = json!(blocks);
+
+                Ok::<Value, JsonRpcError>(response)
+            } else {
+                let empty_vec: Vec<String> = Vec::new();
+                let response = json!(empty_vec);
+
+                Ok::<Value, JsonRpcError>(response)
+            }
+        })
+    })?;
+
     // Retrieve a feed by public key.
     // Returns an array of messages as a KVTs.
     rpc_module.register_method("feed", move |params: Params, _| {
@@ -59,8 +81,7 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
             let db = KV_STORE.read().await;
 
             // Retrieve the message value for the requested message.
-            let feed = db.get_feed(&pub_key.pub_key)?;
-
+            let feed = db.get_feed(&pub_key.0)?;
             let response = json!(feed);
 
             Ok::<Value, JsonRpcError>(response)
@@ -78,7 +99,7 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
             let db = KV_STORE.read().await;
 
             // Retrieve the message value for the requested message.
-            let msg_val = db.get_msg_val(&msg_ref.msg_ref)?;
+            let msg_val = db.get_msg_val(&msg_ref.0)?;
 
             // Retrieve the message KVT for the requested message using the
             // author and sequence fields from the message value.
@@ -100,7 +121,6 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
         task::block_on(async {
             let db = KV_STORE.read().await;
             let peers = db.get_peers().await?;
-
             let response = json!(peers);
 
             Ok::<Value, JsonRpcError>(response)

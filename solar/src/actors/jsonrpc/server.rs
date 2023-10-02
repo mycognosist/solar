@@ -259,6 +259,41 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
         })
     })?;
 
+    // Retrieve the latest image reference for the given public key.
+    //
+    // Returns a string.
+    rpc_module.register_method("latest_image", move |params: Params, _| {
+        task::block_on(async {
+            let pub_key: PubKey = params.parse()?;
+
+            let db = KV_STORE.read().await;
+
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let image = indexes.get_latest_image(&pub_key.0)?;
+            let response = json!(image);
+
+            Ok::<Value, JsonRpcError>(response)
+        })
+    })?;
+
+    // Retrieve the latest self-assigned image reference for the given public
+    // key.
+    //
+    // Returns an array of strings.
+    rpc_module.register_method("latest_self_image", move |params: Params, _| {
+        task::block_on(async {
+            let pub_key: PubKey = params.parse()?;
+
+            let db = KV_STORE.read().await;
+
+            let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
+            let image = indexes.get_latest_self_assigned_image(&pub_key.0)?;
+            let response = json!(image);
+
+            Ok::<Value, JsonRpcError>(response)
+        })
+    })?;
+
     // Retrieve the public keys of all feeds subscribed to the given channel.
     //
     // Returns an array of public keys.

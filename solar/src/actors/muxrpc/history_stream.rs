@@ -147,11 +147,11 @@ where
                 // Instantiate the history stream request args for the given peer.
                 // The `live` arg means: keep the connection open after initial
                 // replication.
-                let mut args = dto::CreateHistoryStreamIn::new(peer_pk.to_owned()).live(true);
+                let mut args = dto::CreateHistoryStreamIn::new(format!("@{}", peer_pk)).live(true);
 
                 // Retrieve the sequence number of the most recent message for
                 // this peer from the local key-value store.
-                if let Some(last_seq) = KV_STORE.read().await.get_latest_seq(&peer_pk.to_owned())? {
+                if let Some(last_seq) = KV_STORE.read().await.get_latest_seq(peer_pk)? {
                     // Use the latest sequence number to update the request args.
                     args = args.after_seq(last_seq);
                 }
@@ -161,12 +161,11 @@ where
 
                 // Insert the history stream request ID and peer ID
                 // (public key) into the peers hash map.
-                self.peers.insert(id, peer_pk.to_owned());
+                self.peers.insert(id, peer_pk.to_string());
 
                 info!(
                     "requesting messages authored by peer {} after {:?}",
-                    peer_pk.to_owned(),
-                    args.seq
+                    peer_pk, args.seq
                 );
             }
 

@@ -13,6 +13,17 @@ use serde_json::{json, Value};
 
 use crate::{broker::*, error::Error, node::KV_STORE, Result};
 
+/// The name of a channel.
+#[derive(Debug, Deserialize)]
+struct Channel(String);
+
+/// The public keys (ID) of two peers.
+#[derive(Debug, Deserialize)]
+struct IsFollowing {
+    peer_a: String,
+    peer_b: String,
+}
+
 /// Message reference containing the key (sha256 hash) of a message.
 /// Used to parse the key from the parameters supplied to the `message`
 /// endpoint.
@@ -22,13 +33,6 @@ struct MsgRef(String);
 /// The public key (ID) of a peer.
 #[derive(Debug, Deserialize)]
 struct PubKey(String);
-
-/// The public keys (ID) of two peers.
-#[derive(Debug, Deserialize)]
-struct IsFollowing {
-    peer_a: String,
-    peer_b: String,
-}
 
 /// Register the JSON-RPC server endpoint, define the JSON-RPC methods
 /// and spawn the server.
@@ -367,12 +371,12 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
     // Returns an array of public keys.
     rpc_module.register_method("subscribers", move |params: Params, _| {
         task::block_on(async {
-            let pub_key: PubKey = params.parse()?;
+            let channel: Channel = params.parse()?;
 
             let db = KV_STORE.read().await;
 
             let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
-            let subscribers = indexes.get_channel_subscribers(&pub_key.0)?;
+            let subscribers = indexes.get_channel_subscribers(&channel.0)?;
             let response = json!(subscribers);
 
             Ok::<Value, JsonRpcError>(response)

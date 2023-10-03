@@ -133,11 +133,31 @@ While running, a solar node can be queried using JSON-RPC over HTTP.
 
 | Method | Parameters | Response | Description |
 | --- | --- | --- | --- |
-| `feed` | `{ "pub_key": "<@...=.ed25519>" }` | `[{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }]` | Return an array of message KVTs (key, value, timestamp) from the local database |
-| `message` | `{ "msg_ref": <key> }` | `{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }` | Return a single message KVT (key, value, timestamp) from the local database |
-| `peers` | | `[{ "pub_key": "<@...=.ed25519>", "seq_num": <int> }` | Return the public key and latest sequence number for all peers in the local database |
+| `blocks` | `"<@...=.ed25519>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
+| `blockers` | `"<@...=.ed25519>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
+| `descriptions` | `"<@...=.ed25519>"` | `[<description>]` | Returns an array of descriptions |
+| `self_descriptions` | `"<@...=.ed25519>"` | `[<description>]` | Returns an array of descriptions |
+| `latest_description` | `"<@...=.ed25519>"` | `<description>` | Returns a single description |
+| `latest_self_description` | `"<@...=.ed25519>"` | `<description>` | Returns a single description |
+| `feed` | `"<@...=.ed25519>"` | `[{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }]` | Returns an array of message KVTs (key, value, timestamp) from the local database |
+| `follows` | `"<@...=.ed25519>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
+| `followers` | `"<@...=.ed25519>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
+| `is_following` | `{ "peer_a": "<@...=.ed25519>", "peer_b": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns a boolean |
+| `friends` | `"<@...=.ed25519>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
+| `images` | `"<@...=.ed25519>"` | `[<&...=.sha256>]` | Returns an array of image references |
+| `self_images` | `"<@...=.ed25519>"` | `[<&...=.sha256>]` | Returns an array of image references |
+| `latest_image` | `"<@...=.ed25519>"` | `<&...=.sha256>` | Returns a single image reference |
+| `latest_self_image` | `"<@...=.ed25519>"` | `<&...=.sha256>` | Returns a single image reference |
+| `message` | `"<%...=.sha256>"` | `{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }` | Returns a single message KVT (key, value, timestamp) from the local database |
+| `names` | `"<@...=.ed25519>"` | `[<name>]` | Returns an array of names |
+| `self_names` | `"<@...=.ed25519>"` | `[<name>]` | Returns an array of names |
+| `latest_name` | `"<@...=.ed25519>"` | `<name>` | Returns a single name |
+| `latest_self_name` | `"<@...=.ed25519>"` | `<name>` | Returns a single name |
+| `peers` | | `[{ "pub_key": "<@...=.ed25519>", "seq_num": <int> }` | Returns an array of public key and latest sequence number for each peer in the local database |
 | `ping` | | `pong!` | Responds if the JSON-RPC server is running |
 | `publish` | `<content>` | `{ "msg_ref": "<%...=.sha256>", "seq_num": <int> }` | Publishes a message and returns the reference (message hash) and sequence number |
+| `subscribers` | `"<channel>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
+| `subscriptions` | `"<@...=.ed25519>"` | `[<channel>]` | Returns an array of channel names |
 | `whoami` | | `<@...=.ed25519>` | Returns the public key of the local node |
 
 ### Examples

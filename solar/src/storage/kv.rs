@@ -1,6 +1,6 @@
 use futures::SinkExt;
 use kuska_ssb::feed::{Feed as MessageKvt, Message as MessageValue};
-use log::warn;
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use sled::{Config as DbConfig, Db};
 
@@ -246,6 +246,7 @@ impl KvStorage {
 
     /// Append a message value to a feed.
     pub async fn append_feed(&self, msg_val: MessageValue) -> Result<u64> {
+        debug!("Appending message to feed in database");
         let seq_num = self.get_latest_seq(msg_val.author())?.map_or(0, |num| num) + 1;
 
         // TODO: We should really be performing more comprehensive validation.
@@ -275,6 +276,7 @@ impl KvStorage {
         // list of peers.
         self.set_peer(&author, seq_num).await?;
 
+        debug!("Passing message to indexer");
         // Pass the author and message value to the indexer.
         if let Some(indexes) = &self.indexes {
             indexes.index_msg(&author, msg_val)?

@@ -7,6 +7,7 @@ use kuska_ssb::{
     api::dto::content::{Image, TypedMessage as MessageContent},
     feed::Message as MessageValue,
 };
+use log::{debug, info};
 use sled::{Db, Tree};
 
 use crate::Result;
@@ -38,6 +39,7 @@ pub struct Indexes {
 impl Indexes {
     /// Open a database tree for each index.
     pub fn open(db: &Db) -> Result<Indexes> {
+        info!("Opening database index trees");
         let blocks = db.open_tree("blocks")?;
         let blockers = db.open_tree("blockers")?;
         let channel_subscribers = db.open_tree("channel_subscribers")?;
@@ -67,6 +69,7 @@ impl Indexes {
 
     /// Index a message based on the author (SSB ID) and content type.
     pub fn index_msg(&self, author_id: &str, msg_val: MessageValue) -> Result<()> {
+        debug!("Indexing message {} from {}", msg_val.sequence(), author_id);
         if let Some(content_val) = msg_val.value.get("content") {
             let content: MessageContent = serde_json::from_value(content_val.to_owned())?;
 

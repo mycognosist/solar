@@ -11,6 +11,8 @@
 //
 // https://github.com/planetary-social/scuttlego/commit/e1412a550652c791dd97c72797ed512f385669e8
 
+// http://dev.planetary.social/replication/ebt.html
+
 // Each name is a JSON string which represents a feed in the @ character notation.
 // The validity of this string should be confirmed when a note is received.
 // Receiving a note with a malformed feed identifier should terminate the EBT
@@ -59,6 +61,18 @@ fn decode(value: i64) -> (bool, Option<bool>, Option<u64>) {
     (replicate_flag, receive_flag, sequence)
 }
 
+/// Encode a replicate flag, receive flag and sequence number as a control
+/// message (aka. note) value.
+///
+/// If the replicate flag is `false`, a value of `-1` is returned.
+///
+/// If the replicate flag is `true` and the receive flag is `true`, a single
+/// bit arithmetic left shift is performed on the sequence number and the
+/// least-significant bit is set to `0`.
+///
+/// If the replicate flag is `true` and the receive flag is `false`, a single
+/// bit arithmetic left shift is performed on the sequence number and the
+/// least-significant bit is set to `1`.
 fn encode(replicate_flag: bool, receive_flag: Option<bool>, sequence: Option<u64>) -> i64 {
     if replicate_flag {
         // Perform a single bit arithmetic left shift.

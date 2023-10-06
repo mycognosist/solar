@@ -15,7 +15,10 @@
 // serde_json::to_string(&notes)?;
 // "{\"@FCX/tsDLpubCPKKfIrw4gc+SQkHcaD17s7GI6i/ziWY=.ed25519\":123,\"@l1sGqWeCZRA99gN+t9sI6+UOzGcHq3KhLQUYEwb4DCo=.ed25519\":-1}"
 
-use std::{collections::HashMap, convert::TryInto};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryInto,
+};
 
 use crate::{config::PEERS_TO_REPLICATE, node::KV_STORE, Result};
 
@@ -41,6 +44,11 @@ struct Ebt {
     local_clock: VectorClock,
     /// The vector clock for each known peer.
     peer_clocks: HashMap<SsbId, VectorClock>,
+    /// A set of all the feeds for which active requests are open.
+    ///
+    /// This allows us to avoid requesting a feed from multiple peers
+    /// simultaneously.
+    requested_feeds: HashSet<SsbId>,
 }
 
 impl Default for Ebt {
@@ -50,6 +58,7 @@ impl Default for Ebt {
             timeout: 3000,
             local_clock: HashMap::new(),
             peer_clocks: HashMap::new(),
+            requested_feeds: HashSet::new(),
         }
     }
 }
@@ -94,7 +103,7 @@ impl Ebt {
     }
 
     /// Request that the feed represented by the given SSB ID be replicated.
-    async fn request(&mut self, peer_id: &SsbId) -> Result<()> {
+    async fn replicate(&mut self, peer_id: &SsbId) -> Result<()> {
         // Look up the latest sequence for the given ID.
         if let Some(seq) = KV_STORE.read().await.get_latest_seq(peer_id)? {
             // Encode the replicate flag, receive flag and sequence.
@@ -108,8 +117,13 @@ impl Ebt {
 
     /// Revoke a replication request for the feed represented by the given SSB
     /// ID.
-    fn revoke_request(&mut self, peer_id: &SsbId) {
+    fn revoke(&mut self, peer_id: &SsbId) {
         self.local_clock.remove(peer_id);
+    }
+
+    /// Request the feed represented by the given SSB ID from a peer.
+    fn request(&mut self, peer_id: &SsbId) {
+        self.requested_feeds.insert(peer_id);
     }
 
     /// Decode a value from a control message (aka. note), returning the values

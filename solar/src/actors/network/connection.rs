@@ -104,7 +104,7 @@ pub async fn actor(
     let connection_id = CONNECTION_MANAGER.write().await.register();
 
     // Record the data associated with this connection.
-    let connection_data = ConnectionData::new(connection_id, None, None);
+    let mut connection_data = ConnectionData::new(connection_id, None, None);
 
     // Register the "connection" actor endpoint with the broker.
     let ActorEndpoint { mut ch_broker, .. } =
@@ -130,7 +130,11 @@ pub async fn actor(
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Connecting(connection_data.to_owned()),
+                    ConnectionEvent::Connecting(
+                        connection_data.to_owned(),
+                        identity,
+                        selective_replication,
+                    ),
                 ))
                 .await?;
 
@@ -184,7 +188,8 @@ pub async fn actor(
                     Destination::Broadcast,
                     ConnectionEvent::Handshaking(
                         connection_data.to_owned(),
-                        stream,
+                        identity,
+                        &mut stream,
                         selective_replication,
                     ),
                 ))

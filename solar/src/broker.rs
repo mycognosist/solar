@@ -13,7 +13,7 @@ use crate::{
         muxrpc::{RpcBlobsGetEvent, RpcBlobsWantsEvent},
         network::{connection_manager::ConnectionEvent, connection_scheduler::DialRequest},
     },
-    storage::{blob::StoBlobEvent, kv::StoKvEvent},
+    storage::{blob::StoreBlobEvent, kv::StoreKvEvent},
     Result,
 };
 
@@ -26,10 +26,8 @@ pub enum BrokerMessage {
     Dial(DialRequest),
     RpcBlobsGet(RpcBlobsGetEvent),
     RpcBlobsWants(RpcBlobsWantsEvent),
-    // TODO: Rename these to `StoreBlob` and `StoreBlobEvent`.
-    StoBlob(StoBlobEvent),
-    // TODO: Rename these to `StoreKv` and `StoreKvEvent`.
-    StoKv(StoKvEvent),
+    StoreBlob(StoreBlobEvent),
+    StoreKv(StoreKvEvent),
 }
 
 pub type ChBrokerSend = mpsc::UnboundedSender<BrokerEvent>;

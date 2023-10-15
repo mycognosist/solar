@@ -11,7 +11,7 @@ use crate::broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination};
 
 #[derive(Debug, Clone)]
 // TODO: Make this a tuple struct.
-pub enum StoBlobEvent {
+pub enum StoreBlobEvent {
     Added(String),
 }
 
@@ -60,7 +60,7 @@ impl BlobStorage {
 
         let broker_msg = BrokerEvent::new(
             Destination::Broadcast,
-            BrokerMessage::StoBlob(StoBlobEvent::Added(id.clone())),
+            BrokerMessage::StoreBlob(StoreBlobEvent::Added(id.clone())),
         );
 
         self.ch_broker

@@ -18,7 +18,7 @@ use crate::{
     config::{PEERS_TO_REPLICATE, RESYNC_CONFIG, SECRET_CONFIG},
     node::BLOB_STORE,
     node::KV_STORE,
-    storage::kv::StoKvEvent,
+    storage::kv::StoreKvEvent,
     Result,
 };
 
@@ -84,7 +84,7 @@ where
                 self.recv_error_response(api, *req_no, err).await
             }
             // Handle a broker message.
-            RpcInput::Message(BrokerMessage::StoKv(StoKvEvent::IdChanged(id))) => {
+            RpcInput::Message(BrokerMessage::StoreKv(StoreKvEvent::IdChanged(id))) => {
                 // Notification from the key-value store indicating that
                 // a new message has just been appended to the feed
                 // identified by `id`.

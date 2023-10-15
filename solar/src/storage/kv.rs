@@ -24,7 +24,8 @@ const PREFIX_BLOB: u8 = 3u8;
 const PREFIX_PEER: u8 = 4u8;
 
 #[derive(Debug, Clone)]
-pub enum StoKvEvent {
+// TODO: Make this a tuple struct.
+pub enum StoreKvEvent {
     IdChanged(String),
 }
 
@@ -288,7 +289,7 @@ impl KvStorage {
         // key has been updated.
         let broker_msg = BrokerEvent::new(
             Destination::Broadcast,
-            BrokerMessage::StoKv(StoKvEvent::IdChanged(author)),
+            BrokerMessage::StoreKv(StoreKvEvent::IdChanged(author)),
         );
 
         // Matching on the error here (instead of unwrapping) allows us to

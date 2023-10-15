@@ -15,7 +15,7 @@ use crate::{
     actors::muxrpc::handler::{RpcHandler, RpcInput},
     broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination},
     node::BLOB_STORE,
-    storage::blob::{StoBlobEvent, ToBlobHashId},
+    storage::blob::{StoreBlobEvent, ToBlobHashId},
     Result,
 };
 
@@ -156,7 +156,7 @@ where
             RpcInput::Message(msg) => {
                 if let BrokerMessage::RpcBlobsWants(RpcBlobsWantsEvent::BroadcastWants(ids)) = msg {
                     return self.event_wants_broadcast(api, &ids).await;
-                } else if let BrokerMessage::StoBlob(StoBlobEvent::Added(blob_id)) = msg {
+                } else if let BrokerMessage::StoreBlob(StoreBlobEvent::Added(blob_id)) = msg {
                     return self.event_stoblob_added(api, &blob_id).await;
                 }
             }

@@ -50,7 +50,7 @@ pub async fn actor(selective_replication: bool) -> Result<()> {
                             SECRET_CONFIG.get().unwrap().to_owned_identity()?,
                             TcpConnection::Dial {
                                 addr: addr.to_string(),
-                                public_key: *public_key,
+                                public_key,
                             },
                             selective_replication,
                         ));

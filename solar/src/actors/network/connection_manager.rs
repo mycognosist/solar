@@ -20,7 +20,7 @@ pub static CONNECTION_MANAGER: Lazy<Arc<RwLock<ConnectionManager>>> =
     Lazy::new(|| Arc::new(RwLock::new(ConnectionManager::new())));
 
 /// Connection events with associated connection data.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConnectionEvent {
     Connecting(ConnectionData),
     Handshaking(ConnectionData),

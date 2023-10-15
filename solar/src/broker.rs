@@ -14,12 +14,29 @@ use futures::{
 use log::{info, trace};
 use once_cell::sync::Lazy;
 
-use crate::Result;
+use crate::{
+    actors::{
+        muxrpc::{RpcBlobsGetEvent, RpcBlobsWantsEvent},
+        network::{connection_manager::ConnectionEvent, connection_scheduler::DialRequest},
+    },
+    storage::{blob::StoBlobEvent, kv::StoKvEvent},
+    Result,
+};
 
 #[derive(Debug)]
 pub struct Void {}
 
-pub type BrokerMessage = Arc<dyn Any + Send + Sync>;
+#[derive(Clone)]
+pub enum BrokerMessage {
+    Connection(ConnectionEvent),
+    Dial(DialRequest),
+    RpcBlobsGet(RpcBlobsGetEvent),
+    RpcBlobsWants(RpcBlobsWantsEvent),
+    // TODO: Rename these to `StoreBlob` and `StoreBlobEvent`.
+    StoBlob(StoBlobEvent),
+    // TODO: Rename these to `StoreKv` and `StoreKvEvent`.
+    StoKv(StoKvEvent),
+}
 
 pub type ChBrokerSend = mpsc::UnboundedSender<BrokerEvent>;
 pub type ChSigSend = oneshot::Sender<Void>;
@@ -50,14 +67,8 @@ pub enum BrokerEvent {
 }
 
 impl BrokerEvent {
-    pub fn new<A>(to: Destination, any: A) -> Self
-    where
-        A: Any + Send + Sync,
-    {
-        BrokerEvent::Message {
-            to,
-            msg: Arc::new(any),
-        }
+    pub fn new(to: Destination, msg: BrokerMessage) -> Self {
+        BrokerEvent::Message { to, msg }
     }
 }
 

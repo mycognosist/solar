@@ -25,11 +25,12 @@ use log::debug;
 
 use crate::{
     actors::network::connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
-    broker::{ActorEndpoint, BrokerEvent, Destination, BROKER},
+    broker::{ActorEndpoint, BrokerEvent, BrokerMessage, Destination, BROKER},
     Result,
 };
 
 /// A request to dial the peer identified by the given public key and address.
+#[derive(Clone)]
 pub struct DialRequest(pub (PublicKey, String));
 
 // Custom `Display` implementation so we can easily log dial requests.
@@ -179,7 +180,7 @@ pub async fn actor(peers: Vec<(PublicKey, String)>) -> Result<()> {
                             // Otherwise, send a dial request to the dialer.
                             let dial_request = DialRequest((public_key, addr));
                             debug!("{}", dial_request);
-                            ch_broker.send(BrokerEvent::new(Destination::Broadcast, dial_request)).await?
+                            ch_broker.send(BrokerEvent::new(Destination::Broadcast, BrokerMessage::Dial(dial_request))).await?
                         }
                     }
                 }
@@ -197,7 +198,7 @@ pub async fn actor(peers: Vec<(PublicKey, String)>) -> Result<()> {
                             // Otherwise, send a dial request to the dialer.
                             let dial_request = DialRequest((public_key, addr));
                             debug!("{}", dial_request);
-                            ch_broker.send(BrokerEvent::new(Destination::Broadcast, dial_request)).await?
+                            ch_broker.send(BrokerEvent::new(Destination::Broadcast, BrokerMessage::Dial(dial_request))).await?
                         }
                     }
                 }

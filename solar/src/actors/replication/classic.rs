@@ -24,6 +24,7 @@ use crate::{
             connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
         },
     },
+    // TODO: Use explicit imports.
     broker::*,
     Result,
 };
@@ -54,7 +55,9 @@ pub async fn actor<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Disconnecting(connection_data.to_owned()),
+                    BrokerMessage::Connection(ConnectionEvent::Disconnecting(
+                        connection_data.to_owned(),
+                    )),
                 ))
                 .await?;
         }
@@ -69,7 +72,10 @@ pub async fn actor<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Error(connection_data, err.to_string()),
+                    BrokerMessage::Connection(ConnectionEvent::Error(
+                        connection_data,
+                        err.to_string(),
+                    )),
                 ))
                 .await?;
         }
@@ -103,7 +109,7 @@ pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send 
     ch_broker
         .send(BrokerEvent::new(
             Destination::Broadcast,
-            ConnectionEvent::Replicating(connection_data.to_owned()),
+            BrokerMessage::Connection(ConnectionEvent::Replicating(connection_data.to_owned())),
         ))
         .await?;
 

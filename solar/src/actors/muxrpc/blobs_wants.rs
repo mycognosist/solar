@@ -13,13 +13,14 @@ use log::{trace, warn};
 
 use crate::{
     actors::muxrpc::handler::{RpcHandler, RpcInput},
-    broker::{BrokerEvent, ChBrokerSend, Destination},
+    broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination},
     node::BLOB_STORE,
     storage::blob::{StoBlobEvent, ToBlobHashId},
     Result,
 };
 
-enum RpcBlobsWantsEvent {
+#[derive(Clone)]
+pub enum RpcBlobsWantsEvent {
     BroadcastWants(Vec<(String, i64)>),
 }
 
@@ -156,13 +157,13 @@ where
                 if let Some(wants_event) = msg.downcast_ref::<RpcBlobsWantsEvent>() {
                     match wants_event {
                         RpcBlobsWantsEvent::BroadcastWants(ids) => {
-                            return self.event_wants_broadcast(api, ids).await
+                            return self.event_wants_broadcast(api, &ids).await
                         }
                     }
                 } else if let Some(stoblob_event) = msg.downcast_ref::<StoBlobEvent>() {
                     match stoblob_event {
                         StoBlobEvent::Added(blob_id) => {
-                            return self.event_stoblob_added(api, blob_id).await
+                            return self.event_stoblob_added(api, &blob_id).await
                         }
                     }
                 }
@@ -289,7 +290,7 @@ where
         // broadcast other peers with the blobs I don't have
         let broker_msg = BrokerEvent::new(
             Destination::Broadcast,
-            RpcBlobsWantsEvent::BroadcastWants(broadcast),
+            BrokerMessage::RpcBlobsWants(RpcBlobsWantsEvent::BroadcastWants(broadcast)),
         );
         ch_broker.send(broker_msg).await.unwrap();
 

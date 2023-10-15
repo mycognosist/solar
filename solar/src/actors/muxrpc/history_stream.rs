@@ -14,7 +14,7 @@ use regex::Regex;
 
 use crate::{
     actors::muxrpc::handler::{RpcHandler, RpcInput},
-    broker::{BrokerEvent, ChBrokerSend, Destination},
+    broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination},
     config::{PEERS_TO_REPLICATE, RESYNC_CONFIG, SECRET_CONFIG},
     node::BLOB_STORE,
     node::KV_STORE,
@@ -76,7 +76,7 @@ where
                 self.recv_rpc_response(api, ch_broker, *req_no, res).await
             }
             // Handle an incoming MUXRPC 'cancel stream' response.
-            RpcInput::Network(req_no, rpc::RecvMsg::CancelStreamRespose()) => {
+            RpcInput::Network(req_no, rpc::RecvMsg::CancelStreamResponse()) => {
                 self.recv_cancelstream(api, *req_no).await
             }
             // Handle an incoming MUXRPC error response.
@@ -91,7 +91,7 @@ where
                         // a new message has just been appended to the feed
                         // identified by `id`.
                         StoKvEvent::IdChanged(id) => {
-                            return self.recv_storageevent_idchanged(api, id).await
+                            return self.recv_storageevent_idchanged(api, &id).await
                         }
                     }
                 }
@@ -244,7 +244,10 @@ where
                             size: None,
                             max: None,
                         });
-                        let broker_msg = BrokerEvent::new(Destination::Broadcast, event);
+                        let broker_msg = BrokerEvent::new(
+                            Destination::Broadcast,
+                            BrokerMessage::RpcBlobsGet(event),
+                        );
                         ch_broker.send(broker_msg).await.unwrap();
                     }
                 }

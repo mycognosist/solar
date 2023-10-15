@@ -21,6 +21,8 @@ use crate::{
     Result,
 };
 
+#[derive(Clone)]
+// TODO: Make this a tuple struct.
 pub enum RpcBlobsGetEvent {
     Get(dto::BlobsGetIn),
 }
@@ -69,7 +71,7 @@ where
                     _ => {}
                 }
             }
-            RpcInput::Network(req_no, rpc::RecvMsg::CancelStreamRespose()) => {
+            RpcInput::Network(req_no, rpc::RecvMsg::CancelStreamResponse()) => {
                 return self.recv_cancelstream(api, *req_no).await;
             }
             RpcInput::Network(req_no, rpc::RecvMsg::RpcResponse(_type, res)) => {
@@ -78,7 +80,7 @@ where
             RpcInput::Message(msg) => {
                 if let Some(get_event) = msg.downcast_ref::<RpcBlobsGetEvent>() {
                     match get_event {
-                        RpcBlobsGetEvent::Get(req) => return self.event_get(api, req).await,
+                        RpcBlobsGetEvent::Get(req) => return self.event_get(api, &req).await,
                     }
                 }
             }

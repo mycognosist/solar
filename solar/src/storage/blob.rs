@@ -7,8 +7,10 @@ use std::{
 use futures::SinkExt;
 use sha2::{Digest, Sha256};
 
-use crate::broker::{BrokerEvent, ChBrokerSend, Destination};
+use crate::broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination};
 
+#[derive(Clone)]
+// TODO: Make this a tuple struct.
 pub enum StoBlobEvent {
     Added(String),
 }
@@ -56,7 +58,10 @@ impl BlobStorage {
         let id = content.as_ref().blob_hash_id();
         File::create(self.path_of(&id))?.write_all(content.as_ref())?;
 
-        let broker_msg = BrokerEvent::new(Destination::Broadcast, StoBlobEvent::Added(id.clone()));
+        let broker_msg = BrokerEvent::new(
+            Destination::Broadcast,
+            BrokerMessage::StoBlob(StoBlobEvent::Added(id.clone())),
+        );
 
         self.ch_broker
             .as_ref()

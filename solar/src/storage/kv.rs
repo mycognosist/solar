@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sled::{Config as DbConfig, Db};
 
 use crate::{
-    broker::{BrokerEvent, ChBrokerSend, Destination},
+    broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination},
     error::Error,
     storage::indexes::Indexes,
     Result,
@@ -286,7 +286,10 @@ impl KvStorage {
 
         // Publish a notification that the feed belonging to the given public
         // key has been updated.
-        let broker_msg = BrokerEvent::new(Destination::Broadcast, StoKvEvent::IdChanged(author));
+        let broker_msg = BrokerEvent::new(
+            Destination::Broadcast,
+            BrokerMessage::StoKv(StoKvEvent::IdChanged(author)),
+        );
 
         // Matching on the error here (instead of unwrapping) allows us to
         // write unit tests for `append_feed`; a case where we do not have

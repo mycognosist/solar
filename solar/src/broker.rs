@@ -20,7 +20,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Void {}
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum BrokerMessage {
     Connection(ConnectionEvent),
     Dial(DialRequest),

@@ -21,7 +21,7 @@ use crate::{
     Result,
 };
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 // TODO: Make this a tuple struct.
 pub enum RpcBlobsGetEvent {
     Get(dto::BlobsGetIn),

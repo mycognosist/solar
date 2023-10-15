@@ -19,7 +19,7 @@ use crate::{
     Result,
 };
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum RpcBlobsWantsEvent {
     BroadcastWants(Vec<(String, i64)>),
 }

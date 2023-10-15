@@ -30,7 +30,7 @@ use crate::{
 };
 
 /// A request to dial the peer identified by the given public key and address.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct DialRequest(pub (PublicKey, String));
 
 // Custom `Display` implementation so we can easily log dial requests.

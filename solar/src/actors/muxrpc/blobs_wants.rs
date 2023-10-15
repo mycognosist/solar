@@ -155,9 +155,9 @@ where
             }
             RpcInput::Message(msg) => {
                 if let BrokerMessage::RpcBlobsWants(RpcBlobsWantsEvent::BroadcastWants(ids)) = msg {
-                    return self.event_wants_broadcast(api, &ids).await;
+                    return self.event_wants_broadcast(api, ids).await;
                 } else if let BrokerMessage::StoreBlob(StoreBlobEvent::Added(blob_id)) = msg {
-                    return self.event_stoblob_added(api, &blob_id).await;
+                    return self.event_stoblob_added(api, blob_id).await;
                 }
             }
             RpcInput::Timer => {

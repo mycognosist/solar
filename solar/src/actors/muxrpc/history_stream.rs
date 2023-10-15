@@ -88,7 +88,7 @@ where
                 // Notification from the key-value store indicating that
                 // a new message has just been appended to the feed
                 // identified by `id`.
-                return self.recv_storageevent_idchanged(api, &id).await;
+                return self.recv_storageevent_idchanged(api, id).await;
             }
             // Handle a timer event.
             RpcInput::Timer => self.on_timer(api).await,

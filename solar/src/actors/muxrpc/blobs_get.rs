@@ -78,7 +78,7 @@ where
                 return self.recv_rpc_response(api, *req_no, res).await;
             }
             RpcInput::Message(BrokerMessage::RpcBlobsGet(RpcBlobsGetEvent::Get(req))) => {
-                return self.event_get(api, &req).await;
+                return self.event_get(api, req).await;
             }
             _ => {}
         }

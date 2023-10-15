@@ -84,18 +84,11 @@ where
                 self.recv_error_response(api, *req_no, err).await
             }
             // Handle a broker message.
-            RpcInput::Message(msg) => {
-                if let Some(kv_event) = msg.downcast_ref::<StoKvEvent>() {
-                    match kv_event {
-                        // Notification from the key-value store indicating that
-                        // a new message has just been appended to the feed
-                        // identified by `id`.
-                        StoKvEvent::IdChanged(id) => {
-                            return self.recv_storageevent_idchanged(api, &id).await
-                        }
-                    }
-                }
-                Ok(false)
+            RpcInput::Message(BrokerMessage::StoKv(StoKvEvent::IdChanged(id))) => {
+                // Notification from the key-value store indicating that
+                // a new message has just been appended to the feed
+                // identified by `id`.
+                return self.recv_storageevent_idchanged(api, &id).await;
             }
             // Handle a timer event.
             RpcInput::Timer => self.on_timer(api).await,

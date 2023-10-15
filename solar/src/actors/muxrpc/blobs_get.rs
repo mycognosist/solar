@@ -15,7 +15,7 @@ use log::{info, trace, warn};
 
 use crate::{
     actors::muxrpc::handler::{RpcHandler, RpcInput},
-    broker::ChBrokerSend,
+    broker::{BrokerMessage, ChBrokerSend},
     node::BLOB_STORE,
     storage::blob::ToBlobHashId,
     Result,
@@ -77,12 +77,8 @@ where
             RpcInput::Network(req_no, rpc::RecvMsg::RpcResponse(_type, res)) => {
                 return self.recv_rpc_response(api, *req_no, res).await;
             }
-            RpcInput::Message(msg) => {
-                if let Some(get_event) = msg.downcast_ref::<RpcBlobsGetEvent>() {
-                    match get_event {
-                        RpcBlobsGetEvent::Get(req) => return self.event_get(api, &req).await,
-                    }
-                }
+            RpcInput::Message(BrokerMessage::RpcBlobsGet(RpcBlobsGetEvent::Get(req))) => {
+                return self.event_get(api, &req).await;
             }
             _ => {}
         }

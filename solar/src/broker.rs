@@ -1,12 +1,6 @@
 use std::collections::hash_map::HashMap;
 
-use async_std::{
-    prelude::*,
-    sync::{Arc, Mutex},
-    task,
-    task::JoinHandle,
-};
-use core::any::Any;
+use async_std::{prelude::*, sync::Mutex, task, task::JoinHandle};
 use futures::{
     channel::{mpsc, oneshot},
     select_biased, FutureExt, SinkExt,

@@ -7,7 +7,7 @@ use futures::{select_biased, FutureExt, StreamExt};
 
 use crate::{
     actors::network::{connection, connection::TcpConnection, connection_scheduler::DialRequest},
-    broker::{ActorEndpoint, Broker, BROKER},
+    broker::{ActorEndpoint, Broker, BrokerMessage, BROKER},
     config::SECRET_CONFIG,
     Result,
 };
@@ -44,17 +44,15 @@ pub async fn actor(selective_replication: bool) -> Result<()> {
             },
             // Received a message from the connection scheduler via the broker.
             msg = broker_msg_ch.next().fuse() => {
-                if let Some(msg) = msg {
-                    if let Some(DialRequest((public_key, addr))) = msg.downcast_ref::<DialRequest>() {
-                        Broker::spawn(connection::actor(
-                            SECRET_CONFIG.get().unwrap().to_owned_identity()?,
-                            TcpConnection::Dial {
-                                addr: addr.to_string(),
-                                public_key,
-                            },
-                            selective_replication,
-                        ));
-                    }
+                if let Some(BrokerMessage::Dial(DialRequest((public_key, addr)))) = msg {
+                    Broker::spawn(connection::actor(
+                        SECRET_CONFIG.get().unwrap().to_owned_identity()?,
+                        TcpConnection::Dial {
+                            addr: addr.to_string(),
+                            public_key,
+                        },
+                        selective_replication,
+                    ));
                 }
             }
         }

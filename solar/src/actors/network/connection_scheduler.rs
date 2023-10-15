@@ -205,50 +205,48 @@ pub async fn actor(peers: Vec<(PublicKey, String)>) -> Result<()> {
             },
             // Received a message from the connection manager via the broker.
             msg = broker_msg_ch.next().fuse() => {
-                if let Some(msg) = msg {
-                    if let Some(conn_event) = msg.downcast_ref::<ConnectionEvent>() {
-                        match conn_event {
-                            ConnectionEvent::Replicating(data) => {
-                                // This connection was "successful".
-                                // Push the peer to the back of the eager queue.
-                                if let Some(public_key) = data.peer_public_key {
-                                    if let Some(addr) = &data.peer_addr {
-                                        // Only push if the peer is not already in the queue.
-                                        if !scheduler.eager_peers.contains(&(public_key, addr.to_string())) {
-                                            scheduler.eager_peers.push_back((public_key, addr.to_owned()))
-                                        }
+                if let Some(BrokerMessage::Connection(conn_event)) = msg {
+                    match conn_event {
+                        ConnectionEvent::Replicating(data) => {
+                            // This connection was "successful".
+                            // Push the peer to the back of the eager queue.
+                            if let Some(public_key) = data.peer_public_key {
+                                if let Some(addr) = &data.peer_addr {
+                                    // Only push if the peer is not already in the queue.
+                                    if !scheduler.eager_peers.contains(&(public_key, addr.to_string())) {
+                                        scheduler.eager_peers.push_back((public_key, addr.to_owned()))
                                     }
                                 }
                             }
-                            ConnectionEvent::Disconnected(data) => {
-                                // This connection may or may not have been "successful".
-                                // If it was successful (ie. replication took place) then
-                                // the peer should have already been pushed back to the eager
-                                // queue. If not, push the peer to the back of the lazy queue.
-                                if let Some(public_key) = data.peer_public_key {
-                                    if let Some(addr) = &data.peer_addr {
-                                        // Only push if the peer is not in the eager queue.
-                                        if !scheduler.eager_peers.contains(&(public_key, addr.to_string())) {
-                                            scheduler.lazy_peers.push_back((public_key, addr.to_owned()))
-                                        }
-                                    }
-                                }
-                            }
-                            ConnectionEvent::Error(data, _err) => {
-                                // This connection was "unsuccessful".
-                                // Push the peer to the back of the lazy queue.
-                                if let Some(public_key) = data.peer_public_key {
-                                    if let Some(addr) = &data.peer_addr {
-                                        // Only push if the peer is not already in the queue.
-                                        if !scheduler.lazy_peers.contains(&(public_key, addr.to_string())) {
-                                            scheduler.lazy_peers.push_back((public_key, addr.to_owned()))
-                                        }
-                                    }
-                                }
-                            }
-                            // Ignore all other connection event variants.
-                            _ => (),
                         }
+                        ConnectionEvent::Disconnected(data) => {
+                            // This connection may or may not have been "successful".
+                            // If it was successful (ie. replication took place) then
+                            // the peer should have already been pushed back to the eager
+                            // queue. If not, push the peer to the back of the lazy queue.
+                            if let Some(public_key) = data.peer_public_key {
+                                if let Some(addr) = &data.peer_addr {
+                                    // Only push if the peer is not in the eager queue.
+                                    if !scheduler.eager_peers.contains(&(public_key, addr.to_string())) {
+                                        scheduler.lazy_peers.push_back((public_key, addr.to_owned()))
+                                    }
+                                }
+                            }
+                        }
+                        ConnectionEvent::Error(data, _err) => {
+                            // This connection was "unsuccessful".
+                            // Push the peer to the back of the lazy queue.
+                            if let Some(public_key) = data.peer_public_key {
+                                if let Some(addr) = &data.peer_addr {
+                                    // Only push if the peer is not already in the queue.
+                                    if !scheduler.lazy_peers.contains(&(public_key, addr.to_string())) {
+                                        scheduler.lazy_peers.push_back((public_key, addr.to_owned()))
+                                    }
+                                }
+                            }
+                        }
+                        // Ignore all other connection event variants.
+                        _ => (),
                     }
                 }
             },

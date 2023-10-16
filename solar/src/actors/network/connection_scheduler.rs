@@ -207,7 +207,7 @@ pub async fn actor(peers: Vec<(PublicKey, String)>) -> Result<()> {
                 if let Some(msg) = msg {
                     if let Some(conn_event) = msg.downcast_ref::<ConnectionEvent>() {
                         match conn_event {
-                            ConnectionEvent::Replicating(data) => {
+                            ConnectionEvent::Replicating(data, _) => {
                                 // This connection was "successful".
                                 // Push the peer to the back of the eager queue.
                                 if let Some(public_key) = data.peer_public_key {

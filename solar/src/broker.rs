@@ -14,12 +14,17 @@ use futures::{
 use log::{info, trace};
 use once_cell::sync::Lazy;
 
-use crate::Result;
+use crate::{actors::network::connection_manager::ConnectionEvent, Result};
 
 #[derive(Debug)]
 pub struct Void {}
 
-pub type BrokerMessage = Arc<dyn Any + Send + Sync>;
+// TODO: What if we make this into an enum and do away with `Arc`
+// and `Any`?
+//pub type BrokerMessage = Arc<dyn Any + Send + Sync>;
+pub enum BrokerMessage {
+    ConnectionEvent(ConnectionEvent),
+}
 
 pub type ChBrokerSend = mpsc::UnboundedSender<BrokerEvent>;
 pub type ChSigSend = oneshot::Sender<Void>;

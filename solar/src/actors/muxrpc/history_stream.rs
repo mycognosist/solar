@@ -13,12 +13,15 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 use crate::{
-    actors::muxrpc::handler::{RpcHandler, RpcInput},
-    broker::{BrokerEvent, ChBrokerSend, Destination},
+    actors::muxrpc::{
+        blobs_get::RpcBlobsGetEvent,
+        handler::{RpcHandler, RpcInput},
+    },
+    broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination},
     config::{PEERS_TO_REPLICATE, RESYNC_CONFIG, SECRET_CONFIG},
     node::BLOB_STORE,
     node::KV_STORE,
-    storage::kv::StoKvEvent,
+    storage::kv::StoreKvEvent,
     Result,
 };
 
@@ -76,7 +79,7 @@ where
                 self.recv_rpc_response(api, ch_broker, *req_no, res).await
             }
             // Handle an incoming MUXRPC 'cancel stream' response.
-            RpcInput::Network(req_no, rpc::RecvMsg::CancelStreamRespose()) => {
+            RpcInput::Network(req_no, rpc::RecvMsg::CancelStreamResponse()) => {
                 self.recv_cancelstream(api, *req_no).await
             }
             // Handle an incoming MUXRPC error response.
@@ -84,18 +87,11 @@ where
                 self.recv_error_response(api, *req_no, err).await
             }
             // Handle a broker message.
-            RpcInput::Message(msg) => {
-                if let Some(kv_event) = msg.downcast_ref::<StoKvEvent>() {
-                    match kv_event {
-                        // Notification from the key-value store indicating that
-                        // a new message has just been appended to the feed
-                        // identified by `id`.
-                        StoKvEvent::IdChanged(id) => {
-                            return self.recv_storageevent_idchanged(api, id).await
-                        }
-                    }
-                }
-                Ok(false)
+            RpcInput::Message(BrokerMessage::StoreKv(StoreKvEvent(id))) => {
+                // Notification from the key-value store indicating that
+                // a new message has just been appended to the feed
+                // identified by `id`.
+                return self.recv_storageevent_idchanged(api, id).await;
             }
             // Handle a timer event.
             RpcInput::Timer => self.on_timer(api).await,
@@ -239,12 +235,15 @@ where
                 // blobstore.
                 for key in self.extract_blob_refs(&msg) {
                     if !BLOB_STORE.read().await.exists(&key) {
-                        let event = super::blobs_get::RpcBlobsGetEvent::Get(dto::BlobsGetIn {
+                        let event = RpcBlobsGetEvent(dto::BlobsGetIn {
                             key,
                             size: None,
                             max: None,
                         });
-                        let broker_msg = BrokerEvent::new(Destination::Broadcast, event);
+                        let broker_msg = BrokerEvent::new(
+                            Destination::Broadcast,
+                            BrokerMessage::RpcBlobsGet(event),
+                        );
                         ch_broker.send(broker_msg).await.unwrap();
                     }
                 }

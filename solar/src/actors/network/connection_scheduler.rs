@@ -25,11 +25,12 @@ use log::debug;
 
 use crate::{
     actors::network::connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
-    broker::{ActorEndpoint, BrokerEvent, Destination, BROKER},
+    broker::{ActorEndpoint, BrokerEvent, BrokerMessage, Destination, BROKER},
     Result,
 };
 
 /// A request to dial the peer identified by the given public key and address.
+#[derive(Debug, Clone)]
 pub struct DialRequest(pub (PublicKey, String));
 
 // Custom `Display` implementation so we can easily log dial requests.
@@ -179,7 +180,7 @@ pub async fn actor(peers: Vec<(PublicKey, String)>) -> Result<()> {
                             // Otherwise, send a dial request to the dialer.
                             let dial_request = DialRequest((public_key, addr));
                             debug!("{}", dial_request);
-                            ch_broker.send(BrokerEvent::new(Destination::Broadcast, dial_request)).await?
+                            ch_broker.send(BrokerEvent::new(Destination::Broadcast, BrokerMessage::Dial(dial_request))).await?
                         }
                     }
                 }
@@ -197,57 +198,55 @@ pub async fn actor(peers: Vec<(PublicKey, String)>) -> Result<()> {
                             // Otherwise, send a dial request to the dialer.
                             let dial_request = DialRequest((public_key, addr));
                             debug!("{}", dial_request);
-                            ch_broker.send(BrokerEvent::new(Destination::Broadcast, dial_request)).await?
+                            ch_broker.send(BrokerEvent::new(Destination::Broadcast, BrokerMessage::Dial(dial_request))).await?
                         }
                     }
                 }
             },
             // Received a message from the connection manager via the broker.
             msg = broker_msg_ch.next().fuse() => {
-                if let Some(msg) = msg {
-                    if let Some(conn_event) = msg.downcast_ref::<ConnectionEvent>() {
-                        match conn_event {
-                            ConnectionEvent::Replicating(data) => {
-                                // This connection was "successful".
-                                // Push the peer to the back of the eager queue.
-                                if let Some(public_key) = data.peer_public_key {
-                                    if let Some(addr) = &data.peer_addr {
-                                        // Only push if the peer is not already in the queue.
-                                        if !scheduler.eager_peers.contains(&(public_key, addr.to_string())) {
-                                            scheduler.eager_peers.push_back((public_key, addr.to_owned()))
-                                        }
+                if let Some(BrokerMessage::Connection(conn_event)) = msg {
+                    match conn_event {
+                        ConnectionEvent::Replicating(data) => {
+                            // This connection was "successful".
+                            // Push the peer to the back of the eager queue.
+                            if let Some(public_key) = data.peer_public_key {
+                                if let Some(addr) = &data.peer_addr {
+                                    // Only push if the peer is not already in the queue.
+                                    if !scheduler.eager_peers.contains(&(public_key, addr.to_string())) {
+                                        scheduler.eager_peers.push_back((public_key, addr.to_owned()))
                                     }
                                 }
                             }
-                            ConnectionEvent::Disconnected(data) => {
-                                // This connection may or may not have been "successful".
-                                // If it was successful (ie. replication took place) then
-                                // the peer should have already been pushed back to the eager
-                                // queue. If not, push the peer to the back of the lazy queue.
-                                if let Some(public_key) = data.peer_public_key {
-                                    if let Some(addr) = &data.peer_addr {
-                                        // Only push if the peer is not in the eager queue.
-                                        if !scheduler.eager_peers.contains(&(public_key, addr.to_string())) {
-                                            scheduler.lazy_peers.push_back((public_key, addr.to_owned()))
-                                        }
-                                    }
-                                }
-                            }
-                            ConnectionEvent::Error(data, _err) => {
-                                // This connection was "unsuccessful".
-                                // Push the peer to the back of the lazy queue.
-                                if let Some(public_key) = data.peer_public_key {
-                                    if let Some(addr) = &data.peer_addr {
-                                        // Only push if the peer is not already in the queue.
-                                        if !scheduler.lazy_peers.contains(&(public_key, addr.to_string())) {
-                                            scheduler.lazy_peers.push_back((public_key, addr.to_owned()))
-                                        }
-                                    }
-                                }
-                            }
-                            // Ignore all other connection event variants.
-                            _ => (),
                         }
+                        ConnectionEvent::Disconnected(data) => {
+                            // This connection may or may not have been "successful".
+                            // If it was successful (ie. replication took place) then
+                            // the peer should have already been pushed back to the eager
+                            // queue. If not, push the peer to the back of the lazy queue.
+                            if let Some(public_key) = data.peer_public_key {
+                                if let Some(addr) = &data.peer_addr {
+                                    // Only push if the peer is not in the eager queue.
+                                    if !scheduler.eager_peers.contains(&(public_key, addr.to_string())) {
+                                        scheduler.lazy_peers.push_back((public_key, addr.to_owned()))
+                                    }
+                                }
+                            }
+                        }
+                        ConnectionEvent::Error(data, _err) => {
+                            // This connection was "unsuccessful".
+                            // Push the peer to the back of the lazy queue.
+                            if let Some(public_key) = data.peer_public_key {
+                                if let Some(addr) = &data.peer_addr {
+                                    // Only push if the peer is not already in the queue.
+                                    if !scheduler.lazy_peers.contains(&(public_key, addr.to_string())) {
+                                        scheduler.lazy_peers.push_back((public_key, addr.to_owned()))
+                                    }
+                                }
+                            }
+                        }
+                        // Ignore all other connection event variants.
+                        _ => (),
                     }
                 }
             },

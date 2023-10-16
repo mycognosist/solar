@@ -11,7 +11,7 @@ use log::info;
 
 use crate::{
     actors::network::connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
-    broker::*,
+    broker::{ActorEndpoint, Broker, BrokerEvent, BrokerMessage, Destination, BROKER},
     config::{NETWORK_KEY, PEERS_TO_REPLICATE},
     Result,
 };
@@ -112,7 +112,10 @@ pub async fn actor(
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Error(connection_data, err.to_string()),
+                    BrokerMessage::Connection(ConnectionEvent::Error(
+                        connection_data,
+                        err.to_string(),
+                    )),
                 ))
                 .await?;
         }
@@ -121,7 +124,9 @@ pub async fn actor(
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Disconnected(connection_data.to_owned()),
+                    BrokerMessage::Connection(ConnectionEvent::Disconnected(
+                        connection_data.to_owned(),
+                    )),
                 ))
                 .await?;
         }
@@ -160,7 +165,9 @@ pub async fn actor_inner(
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Connecting(connection_data.to_owned()),
+                    BrokerMessage::Connection(ConnectionEvent::Connecting(
+                        connection_data.to_owned(),
+                    )),
                 ))
                 .await?;
 
@@ -171,7 +178,9 @@ pub async fn actor_inner(
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Handshaking(connection_data.to_owned()),
+                    BrokerMessage::Connection(ConnectionEvent::Handshaking(
+                        connection_data.to_owned(),
+                    )),
                 ))
                 .await?;
 
@@ -185,7 +194,9 @@ pub async fn actor_inner(
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Connected(connection_data.to_owned()),
+                    BrokerMessage::Connection(ConnectionEvent::Connected(
+                        connection_data.to_owned(),
+                    )),
                 ))
                 .await?;
 
@@ -205,7 +216,9 @@ pub async fn actor_inner(
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Connecting(connection_data.to_owned()),
+                    BrokerMessage::Connection(ConnectionEvent::Connecting(
+                        connection_data.to_owned(),
+                    )),
                 ))
                 .await?;
 
@@ -213,7 +226,9 @@ pub async fn actor_inner(
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Handshaking(connection_data.to_owned()),
+                    BrokerMessage::Connection(ConnectionEvent::Handshaking(
+                        connection_data.to_owned(),
+                    )),
                 ))
                 .await?;
 
@@ -238,7 +253,9 @@ pub async fn actor_inner(
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Connected(connection_data.to_owned()),
+                    BrokerMessage::Connection(ConnectionEvent::Connected(
+                        connection_data.to_owned(),
+                    )),
                 ))
                 .await?;
 
@@ -259,7 +276,9 @@ pub async fn actor_inner(
                 ch_broker
                     .send(BrokerEvent::new(
                         Destination::Broadcast,
-                        ConnectionEvent::Disconnecting(connection_data.to_owned()),
+                        BrokerMessage::Connection(ConnectionEvent::Disconnecting(
+                            connection_data.to_owned(),
+                        )),
                     ))
                     .await?;
 
@@ -286,7 +305,9 @@ pub async fn actor_inner(
                 ch_broker
                     .send(BrokerEvent::new(
                         Destination::Broadcast,
-                        ConnectionEvent::Disconnecting(connection_data.to_owned()),
+                        BrokerMessage::Connection(ConnectionEvent::Disconnecting(
+                            connection_data.to_owned(),
+                        )),
                     ))
                     .await?;
 

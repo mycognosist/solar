@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sled::{Config as DbConfig, Db};
 
 use crate::{
-    broker::{BrokerEvent, ChBrokerSend, Destination},
+    broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination},
     error::Error,
     storage::indexes::Indexes,
     Result,
@@ -23,10 +23,10 @@ const PREFIX_BLOB: u8 = 3u8;
 /// Prefix for a key to a peer.
 const PREFIX_PEER: u8 = 4u8;
 
+/// The feed belonging to the given SSB ID has changed
+/// (ie. a new message has been appended to the feed).
 #[derive(Debug, Clone)]
-pub enum StoKvEvent {
-    IdChanged(String),
-}
+pub struct StoreKvEvent(pub String);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlobStatus {
@@ -286,7 +286,10 @@ impl KvStorage {
 
         // Publish a notification that the feed belonging to the given public
         // key has been updated.
-        let broker_msg = BrokerEvent::new(Destination::Broadcast, StoKvEvent::IdChanged(author));
+        let broker_msg = BrokerEvent::new(
+            Destination::Broadcast,
+            BrokerMessage::StoreKv(StoreKvEvent(author)),
+        );
 
         // Matching on the error here (instead of unwrapping) allows us to
         // write unit tests for `append_feed`; a case where we do not have

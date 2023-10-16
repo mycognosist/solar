@@ -15,15 +15,14 @@ use log::{info, trace, warn};
 
 use crate::{
     actors::muxrpc::handler::{RpcHandler, RpcInput},
-    broker::ChBrokerSend,
+    broker::{BrokerMessage, ChBrokerSend},
     node::BLOB_STORE,
     storage::blob::ToBlobHashId,
     Result,
 };
 
-pub enum RpcBlobsGetEvent {
-    Get(dto::BlobsGetIn),
-}
+#[derive(Debug, Clone)]
+pub struct RpcBlobsGetEvent(pub dto::BlobsGetIn);
 
 pub struct BlobsGetHandler<W>
 where
@@ -69,18 +68,14 @@ where
                     _ => {}
                 }
             }
-            RpcInput::Network(req_no, rpc::RecvMsg::CancelStreamRespose()) => {
+            RpcInput::Network(req_no, rpc::RecvMsg::CancelStreamResponse()) => {
                 return self.recv_cancelstream(api, *req_no).await;
             }
             RpcInput::Network(req_no, rpc::RecvMsg::RpcResponse(_type, res)) => {
                 return self.recv_rpc_response(api, *req_no, res).await;
             }
-            RpcInput::Message(msg) => {
-                if let Some(get_event) = msg.downcast_ref::<RpcBlobsGetEvent>() {
-                    match get_event {
-                        RpcBlobsGetEvent::Get(req) => return self.event_get(api, req).await,
-                    }
-                }
+            RpcInput::Message(BrokerMessage::RpcBlobsGet(RpcBlobsGetEvent(req))) => {
+                return self.event_get(api, req).await;
             }
             _ => {}
         }

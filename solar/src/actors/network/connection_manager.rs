@@ -12,7 +12,7 @@ use once_cell::sync::Lazy;
 
 use crate::{
     actors::network::connection::ConnectionData,
-    broker::{ActorEndpoint, BROKER},
+    broker::{ActorEndpoint, BrokerMessage, BROKER},
 };
 
 /// The connection manager for the solar node.
@@ -20,7 +20,7 @@ pub static CONNECTION_MANAGER: Lazy<Arc<RwLock<ConnectionManager>>> =
     Lazy::new(|| Arc::new(RwLock::new(ConnectionManager::new())));
 
 /// Connection events with associated connection data.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConnectionEvent {
     Connecting(ConnectionData),
     Handshaking(ConnectionData),
@@ -135,55 +135,53 @@ impl ConnectionManager {
                     break;
                 },
                 msg = broker_msg_ch.next().fuse() => {
-                    if let Some(msg) = msg {
-                        if let Some(conn_event) = msg.downcast_ref::<ConnectionEvent>() {
-                            match conn_event {
-                                ConnectionEvent::Connecting(data) => {
-                                    trace!(target: "connection-manager", "Connecting: {data}");
-                                }
-                                ConnectionEvent::Handshaking(data) => {
-                                    trace!(target: "connection-manager", "Handshaking: {data}");
-                                }
-                                ConnectionEvent::Connected(data) => {
-                                    trace!(target: "connection-manager", "Connected: {data}");
+                    if let Some(BrokerMessage::Connection(conn_event)) = msg {
+                        match conn_event {
+                            ConnectionEvent::Connecting(data) => {
+                                trace!(target: "connection-manager", "Connecting: {data}");
+                            }
+                            ConnectionEvent::Handshaking(data) => {
+                                trace!(target: "connection-manager", "Handshaking: {data}");
+                            }
+                            ConnectionEvent::Connected(data) => {
+                                trace!(target: "connection-manager", "Connected: {data}");
 
-                                    // Add the peer to the list of connected peers.
-                                    if let Some(public_key) = data.peer_public_key {
-                                        CONNECTION_MANAGER
-                                            .write()
-                                            .await
-                                            .insert_connected_peer(public_key);
-                                    }
-                                }
-                                ConnectionEvent::Replicating(data) => {
-                                    trace!(target: "connection-manager", "Replicating: {data}");
-                                }
-                                ConnectionEvent::Disconnecting(data) => {
-                                    trace!(target: "connection-manager", "Disconnecting: {data}");
-                                }
-                                ConnectionEvent::Disconnected(data) => {
-                                    trace!(target: "connection-manager", "Disconnected: {data}");
-
-                                    // Remove the peer from the list of connected peers.
-                                    if let Some(public_key) = data.peer_public_key {
+                                // Add the peer to the list of connected peers.
+                                if let Some(public_key) = data.peer_public_key {
                                     CONNECTION_MANAGER
                                         .write()
                                         .await
-                                        .remove_connected_peer(public_key);
-
-                                    }
+                                        .insert_connected_peer(public_key);
                                 }
-                                ConnectionEvent::Error(data, err) => {
-                                    trace!(target: "connection-manager", "Error: {data}: {err}");
+                            }
+                            ConnectionEvent::Replicating(data) => {
+                                trace!(target: "connection-manager", "Replicating: {data}");
+                            }
+                            ConnectionEvent::Disconnecting(data) => {
+                                trace!(target: "connection-manager", "Disconnecting: {data}");
+                            }
+                            ConnectionEvent::Disconnected(data) => {
+                                trace!(target: "connection-manager", "Disconnected: {data}");
 
-                                    // Remove the peer from the list of connected peers.
-                                    if let Some(public_key) = data.peer_public_key {
-                                    CONNECTION_MANAGER
-                                        .write()
-                                        .await
-                                        .remove_connected_peer(public_key);
+                                // Remove the peer from the list of connected peers.
+                                if let Some(public_key) = data.peer_public_key {
+                                CONNECTION_MANAGER
+                                    .write()
+                                    .await
+                                    .remove_connected_peer(public_key);
 
-                                    }
+                                }
+                            }
+                            ConnectionEvent::Error(data, err) => {
+                                trace!(target: "connection-manager", "Error: {data}: {err}");
+
+                                // Remove the peer from the list of connected peers.
+                                if let Some(public_key) = data.peer_public_key {
+                                CONNECTION_MANAGER
+                                    .write()
+                                    .await
+                                    .remove_connected_peer(public_key);
+
                                 }
                             }
                         }

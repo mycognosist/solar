@@ -7,11 +7,11 @@ use std::{
 use futures::SinkExt;
 use sha2::{Digest, Sha256};
 
-use crate::broker::{BrokerEvent, ChBrokerSend, Destination};
+use crate::broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination};
 
-pub enum StoBlobEvent {
-    Added(String),
-}
+/// A blob has been added to the store.
+#[derive(Debug, Clone)]
+pub struct StoreBlobEvent(pub String);
 
 #[derive(Default)]
 pub struct BlobStorage {
@@ -56,7 +56,10 @@ impl BlobStorage {
         let id = content.as_ref().blob_hash_id();
         File::create(self.path_of(&id))?.write_all(content.as_ref())?;
 
-        let broker_msg = BrokerEvent::new(Destination::Broadcast, StoBlobEvent::Added(id.clone()));
+        let broker_msg = BrokerEvent::new(
+            Destination::Broadcast,
+            BrokerMessage::StoreBlob(StoreBlobEvent(id.clone())),
+        );
 
         self.ch_broker
             .as_ref()

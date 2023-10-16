@@ -7,7 +7,7 @@ use async_std::{
 use futures::{pin_mut, select_biased, stream::StreamExt, FutureExt, SinkExt};
 use kuska_ssb::{
     api::ApiCaller,
-    crypto::{ed25519, ToSsbId},
+    crypto::ToSsbId,
     handshake::{async_std::BoxStream, HandshakeComplete},
     rpc::{RpcReader, RpcWriter},
 };
@@ -24,7 +24,9 @@ use crate::{
             connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
         },
     },
-    broker::*,
+    broker::{
+        ActorEndpoint, BrokerEvent, BrokerMessage, ChMsgRecv, ChSigRecv, Destination, BROKER,
+    },
     Result,
 };
 
@@ -46,7 +48,9 @@ pub async fn actor(connection_data: ConnectionData) -> Result<()> {
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Disconnecting(connection_data),
+                    BrokerMessage::Connection(ConnectionEvent::Disconnecting(
+                        connection_data.to_owned(),
+                    )),
                 ))
                 .await?;
         }
@@ -60,7 +64,10 @@ pub async fn actor(connection_data: ConnectionData) -> Result<()> {
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    ConnectionEvent::Error(connection_data, err.to_string()),
+                    BrokerMessage::Connection(ConnectionEvent::Error(
+                        connection_data,
+                        err.to_string(),
+                    )),
                 ))
                 .await?;
         }
@@ -94,15 +101,21 @@ pub async fn actor_inner(
     ch_broker
         .send(BrokerEvent::new(
             Destination::Broadcast,
-            ConnectionEvent::Replicating(connection_data.to_owned(), _),
+            BrokerMessage::Connection(ConnectionEvent::Replicating(connection_data.to_owned())),
         ))
         .await?;
     */
 
+    let stream_reader = connection_data.stream.clone().unwrap();
+    let stream_writer = connection_data.stream.clone().unwrap();
+    let handshake = connection_data.handshake.clone().unwrap();
+
     // Spawn the replication loop (responsible for negotiating RPC requests).
-    let conn_data = replication_loop(
+    replication_loop(
         actor_id,
-        connection_data,
+        stream_reader,
+        stream_writer,
+        handshake,
         ch_terminate,
         ch_msg.unwrap(),
         connection_idle_timeout_limit,
@@ -111,32 +124,29 @@ pub async fn actor_inner(
 
     let _ = ch_broker.send(BrokerEvent::Disconnect { actor_id }).await;
 
-    Ok(conn_data)
+    Ok(connection_data)
 }
 
-//async fn replication_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync>(
-async fn replication_loop(
+async fn replication_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync>(
     actor_id: usize,
-    connection_data: ConnectionData,
+    stream_reader: R,
+    stream_writer: W,
+    handshake: HandshakeComplete,
     ch_terminate: ChSigRecv,
     mut ch_msg: ChMsgRecv,
     connection_idle_timeout_limit: u8,
-) -> Result<ConnectionData> {
+) -> Result<()> {
     // TODO: Handle the unwrap.
     //
     // Parse the peer public key from the handshake.
-    let peer_ssb_id = connection_data.handshake.unwrap().peer_pk.to_ssb_id();
+    let peer_ssb_id = handshake.peer_pk.to_ssb_id();
 
     // TODO: Handle the unwraps.
     //
     // Instantiate a box stream and split it into reader and writer streams.
-    let (box_stream_read, box_stream_write) = BoxStream::from_handshake(
-        &connection_data.stream.unwrap(),
-        &connection_data.stream.unwrap(),
-        connection_data.handshake.unwrap(),
-        0x8000,
-    )
-    .split_read_write();
+    let (box_stream_read, box_stream_write) =
+        BoxStream::from_handshake(stream_reader, stream_writer, handshake, 0x8000)
+            .split_read_write();
 
     // Instantiate RPC reader and writer using the box streams.
     let rpc_reader = RpcReader::new(box_stream_read);
@@ -236,5 +246,5 @@ async fn replication_loop(
 
     trace!(target: "replication-loop", "peer loop concluded with: {}", peer_ssb_id);
 
-    Ok(connection_data)
+    Ok(())
 }

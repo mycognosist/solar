@@ -13,15 +13,14 @@ use log::{trace, warn};
 
 use crate::{
     actors::muxrpc::handler::{RpcHandler, RpcInput},
-    broker::{BrokerEvent, ChBrokerSend, Destination},
+    broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination},
     node::BLOB_STORE,
-    storage::blob::{StoBlobEvent, ToBlobHashId},
+    storage::blob::{StoreBlobEvent, ToBlobHashId},
     Result,
 };
 
-enum RpcBlobsWantsEvent {
-    BroadcastWants(Vec<(String, i64)>),
-}
+#[derive(Debug, Clone)]
+pub struct RpcBlobsWantsEvent(Vec<(String, i64)>);
 
 #[derive(PartialEq)]
 enum Wants {
@@ -153,18 +152,10 @@ where
                 }
             }
             RpcInput::Message(msg) => {
-                if let Some(wants_event) = msg.downcast_ref::<RpcBlobsWantsEvent>() {
-                    match wants_event {
-                        RpcBlobsWantsEvent::BroadcastWants(ids) => {
-                            return self.event_wants_broadcast(api, ids).await
-                        }
-                    }
-                } else if let Some(stoblob_event) = msg.downcast_ref::<StoBlobEvent>() {
-                    match stoblob_event {
-                        StoBlobEvent::Added(blob_id) => {
-                            return self.event_stoblob_added(api, blob_id).await
-                        }
-                    }
+                if let BrokerMessage::RpcBlobsWants(RpcBlobsWantsEvent(ids)) = msg {
+                    return self.event_wants_broadcast(api, ids).await;
+                } else if let BrokerMessage::StoreBlob(StoreBlobEvent(blob_id)) = msg {
+                    return self.event_stoblob_added(api, blob_id).await;
                 }
             }
             RpcInput::Timer => {
@@ -289,7 +280,7 @@ where
         // broadcast other peers with the blobs I don't have
         let broker_msg = BrokerEvent::new(
             Destination::Broadcast,
-            RpcBlobsWantsEvent::BroadcastWants(broadcast),
+            BrokerMessage::RpcBlobsWants(RpcBlobsWantsEvent(broadcast)),
         );
         ch_broker.send(broker_msg).await.unwrap();
 

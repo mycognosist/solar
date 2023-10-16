@@ -9,10 +9,10 @@ use async_std::{
 use futures::{select_biased, stream::StreamExt, FutureExt, SinkExt};
 use kuska_ssb::{
     crypto::{ed25519, ToSsbId},
-    handshake::async_std::{handshake_client, handshake_server},
+    handshake::async_std::handshake_client,
     keystore::OwnedIdentity,
 };
-use log::{error, info, trace};
+use log::{info, trace};
 use once_cell::sync::Lazy;
 
 use crate::{
@@ -26,7 +26,7 @@ pub static CONNECTION_MANAGER: Lazy<Arc<RwLock<ConnectionManager>>> =
     Lazy::new(|| Arc::new(RwLock::new(ConnectionManager::new())));
 
 /// Connection events with associated connection data.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConnectionEvent {
     Connecting(ConnectionData, OwnedIdentity, bool),
     Handshaking(ConnectionData, OwnedIdentity, bool),
@@ -141,184 +141,180 @@ impl ConnectionManager {
                     break;
                 },
                 msg = broker_msg_ch.next().fuse() => {
-                    if let Some(BrokerMessage::ConnectionEvent(event)) = msg {
-                        //if let Some(conn_event) = msg.downcast_ref::<ConnectionEvent>() {
-                        //if let Some(conn_event) = msg.downcast_ref::<ConnectionEvent>() {
-                            match event {
-                                ConnectionEvent::Connecting(mut connection_data, identity, selective_replication) => {
-                                    trace!(target: "connection-manager", "Connecting: {connection_data}");
+                    if let Some(BrokerMessage::Connection(event)) = msg {
+                        match event {
+                            ConnectionEvent::Connecting(mut connection_data, identity, selective_replication) => {
+                                trace!(target: "connection-manager", "Connecting: {connection_data}");
 
-                                    // Check if we are already connected to the selected peer.
-                                    // If yes, remove this connection.
-                                    if let Some(peer_public_key) = &connection_data.peer_public_key {
-                                        if CONNECTION_MANAGER
-                                            .read()
-                                            .await
-                                            .contains_connected_peer(peer_public_key)
-                                        {
-                                            info!("peer {} is already connected", peer_public_key.to_ssb_id());
-
-                                            // Since we already have an active connection to this peer,
-                                            // we can disconnect the redundant connection.
-
-                                            // Send 'disconnecting' connection event message via the broker.
-                                            ch_broker
-                                                .send(BrokerEvent::new(
-                                                    Destination::Broadcast,
-                                                    ConnectionEvent::Disconnecting(connection_data.to_owned()),
-                                                ))
-                                                // TODO: Handle unwrap.
-                                                .await.unwrap();
-                                        } else {
-                                            if let Some(addr) = &connection_data.peer_addr {
-                                            // Attempt connection.
-                                            if let Ok(mut stream) = TcpStream::connect(&addr).await {
-                                                connection_data.stream = Some(stream);
-
-                                                // Send 'handshaking' connection event message via the broker.
-                                                ch_broker
-                                                    .send(BrokerEvent::new(
-                                                        Destination::Broadcast,
-                                                        ConnectionEvent::Handshaking(connection_data.to_owned(), identity.to_owned(), *selective_replication),
-                                                    ))
-                                                    .await.unwrap();
-                                            }
-                                        }
-                                        }
-                                    }
-                                }
-                                ConnectionEvent::Handshaking(mut connection_data, identity, selective_replication) => {
-                                    trace!(target: "connection-manager", "Handshaking: {connection_data}");
-
-                                    // Parse the public key and secret key from the SSB identity.
-                                    let OwnedIdentity { pk, sk, .. } = identity.to_owned();
-
-                                    // Define the network key to be used for the secret handshake.
-                                    let network_key = NETWORK_KEY.get().unwrap().to_owned();
-
-                                    // Attempt a secret handshake.
-                                    let handshake =
-                                        handshake_client(
-                                            &mut connection_data.stream.unwrap().clone(),
-                                            network_key.to_owned(),
-                                            pk,
-                                            sk,
-                                            connection_data.peer_public_key.unwrap()
-                                        ).await.unwrap();
-
-                                    connection_data.handshake = Some(handshake);
-
-                                    // Send 'connected' connection event message via the broker.
-                                    ch_broker
-                                        .send(BrokerEvent::new(
-                                            Destination::Broadcast,
-                                            ConnectionEvent::Connected(connection_data.to_owned(), *selective_replication),
-                                        ))
-                                        .await.unwrap();
-                                }
-                                ConnectionEvent::Connected(connection_data, selective_replication) => {
-                                    trace!(target: "connection-manager", "Connected: {connection_data}");
-
-                                    // Add the peer to the list of connected peers.
-                                    if let Some(public_key) = connection_data.peer_public_key {
-                                        info!("💃 connected to peer {}", public_key.to_ssb_id());
-
-                                        CONNECTION_MANAGER
-                                            .write()
-                                            .await
-                                            .insert_connected_peer(public_key);
-                                    }
-
-                                    // Send 'replicating' connection event message via the broker.
-                                    ch_broker
-                                        .send(BrokerEvent::new(
-                                            Destination::Broadcast,
-                                            ConnectionEvent::Replicating(connection_data.to_owned(), *selective_replication),
-                                        ))
-                                        .await.unwrap();
-                                }
-                                ConnectionEvent::Replicating(connection_data, selective_replication) => {
-                                    trace!(target: "connection-manager", "Replicating: {connection_data}");
-
-                                    // Shutdown the connection if the peer is not in the list of peers
-                                    // to be replicated, unless replication is set to nonselective.
-                                    // This ensures we do not replicate with unknown peers.
-                                    // TODO: Need to find a way to get `selective_replication`
-                                    // config value into the loop...
-                                    if selective_replication & !PEERS_TO_REPLICATE
-                                            .get()
-                                            .unwrap()
-                                            .contains_key(&connection_data.peer_public_key.unwrap().to_ssb_id())
+                                // Check if we are already connected to the selected peer.
+                                // If yes, remove this connection.
+                                if let Some(peer_public_key) = &connection_data.peer_public_key {
+                                    if CONNECTION_MANAGER
+                                        .read()
+                                        .await
+                                        .contains_connected_peer(peer_public_key)
                                     {
-                                        info!(
-                                            "peer {} is not in replication list and selective replication is enabled; dropping connection",
-                                            connection_data.peer_public_key.unwrap().to_ssb_id()
-                                        );
+                                        info!("peer {} is already connected", peer_public_key.to_ssb_id());
 
-                                        // TODO: I'm not sure this should be an actor. It might be
-                                        // better to have it return the `connection_data` so that
-                                        // it can then be passed to the `Disconnecting` event.
-                                        //
-                                        // Spawn the classic replication actor and await the result.
-                                        Broker::spawn(crate::actors::replication::classic::actor(
-                                            connection_data.to_owned(),
-                                        ))
-                                        .await;
+                                        // Since we already have an active connection to this peer,
+                                        // we can disconnect the redundant connection.
 
-                                        // Send connection event message via the broker.
+                                        // Send 'disconnecting' connection event message via the broker.
                                         ch_broker
                                             .send(BrokerEvent::new(
                                                 Destination::Broadcast,
-                                                ConnectionEvent::Disconnecting(connection_data.to_owned())
+                                                BrokerMessage::Connection(ConnectionEvent::Disconnecting(connection_data.to_owned())),
                                             ))
+                                            // TODO: Handle unwrap.
                                             .await.unwrap();
-                                    } else {
-                                        // TODO: Attempt EBT replication, using classic replication
-                                        // as fallback.
-                                    }
-                                }
-                                ConnectionEvent::Disconnecting(connection_data) => {
-                                    trace!(target: "connection-manager", "Disconnecting: {connection_data}");
+                                    } else if let Some(addr) = &connection_data.peer_addr {
+                                        // Attempt connection.
+                                        if let Ok(stream) = TcpStream::connect(&addr).await {
+                                            connection_data.stream = Some(stream);
 
-                                    if let Some(stream) = &connection_data.stream {
-                                        // This may not be necessary; the connection should close when
-                                        // the stream is dropped.
-                                        stream.shutdown(Shutdown::Both).unwrap();
-                                    }
-
-                                    ch_broker
-                                        .send(BrokerEvent::new(
-                                            Destination::Broadcast,
-                                            ConnectionEvent::Disconnected(*connection_data),
-                                        ))
-                                        .await.unwrap();
-                                }
-                                ConnectionEvent::Disconnected(data) => {
-                                    trace!(target: "connection-manager", "Disconnected: {data}");
-
-                                    // Remove the peer from the list of connected peers.
-                                    if let Some(public_key) = data.peer_public_key {
-                                    CONNECTION_MANAGER
-                                        .write()
-                                        .await
-                                        .remove_connected_peer(public_key);
-
-                                    }
-                                }
-                                ConnectionEvent::Error(data, err) => {
-                                    trace!(target: "connection-manager", "Error: {data}: {err}");
-
-                                    // Remove the peer from the list of connected peers.
-                                    if let Some(public_key) = data.peer_public_key {
-                                    CONNECTION_MANAGER
-                                        .write()
-                                        .await
-                                        .remove_connected_peer(public_key);
-
+                                            // Send 'handshaking' connection event message via the broker.
+                                            ch_broker
+                                                .send(BrokerEvent::new(
+                                                    Destination::Broadcast,
+                                                    BrokerMessage::Connection(ConnectionEvent::Handshaking(connection_data.to_owned(), identity.to_owned(), selective_replication)),
+                                                ))
+                                                .await.unwrap();
+                                        }
                                     }
                                 }
                             }
-                        //}
+                            ConnectionEvent::Handshaking(mut connection_data, identity, selective_replication) => {
+                                trace!(target: "connection-manager", "Handshaking: {connection_data}");
+
+                                // Parse the public key and secret key from the SSB identity.
+                                let OwnedIdentity { pk, sk, .. } = identity.to_owned();
+
+                                // Define the network key to be used for the secret handshake.
+                                let network_key = NETWORK_KEY.get().unwrap().to_owned();
+
+                                let stream = connection_data.stream.clone();
+
+                                // Attempt a secret handshake.
+                                let handshake =
+                                    handshake_client(
+                                        &mut stream.unwrap(),
+                                        network_key.to_owned(),
+                                        pk,
+                                        sk,
+                                        connection_data.peer_public_key.unwrap()
+                                    ).await.unwrap();
+
+                                connection_data.handshake = Some(handshake);
+
+                                // Send 'connected' connection event message via the broker.
+                                ch_broker
+                                    .send(BrokerEvent::new(
+                                        Destination::Broadcast,
+                                        BrokerMessage::Connection(ConnectionEvent::Connected(connection_data, selective_replication)),
+                                    ))
+                                    .await.unwrap();
+                            }
+                            ConnectionEvent::Connected(connection_data, selective_replication) => {
+                                trace!(target: "connection-manager", "Connected: {connection_data}");
+
+                                // Add the peer to the list of connected peers.
+                                if let Some(public_key) = connection_data.peer_public_key {
+                                    info!("💃 connected to peer {}", public_key.to_ssb_id());
+
+                                    CONNECTION_MANAGER
+                                        .write()
+                                        .await
+                                        .insert_connected_peer(public_key);
+                                }
+
+                                // Send 'replicating' connection event message via the broker.
+                                ch_broker
+                                    .send(BrokerEvent::new(
+                                        Destination::Broadcast,
+                                        BrokerMessage::Connection(ConnectionEvent::Replicating(connection_data.to_owned(), selective_replication)),
+                                    ))
+                                    .await.unwrap();
+                            }
+                            ConnectionEvent::Replicating(connection_data, selective_replication) => {
+                                trace!(target: "connection-manager", "Replicating: {connection_data}");
+
+                                // Shutdown the connection if the peer is not in the list of peers
+                                // to be replicated, unless replication is set to nonselective.
+                                // This ensures we do not replicate with unknown peers.
+                                // TODO: Need to find a way to get `selective_replication`
+                                // config value into the loop...
+                                if selective_replication & !PEERS_TO_REPLICATE
+                                        .get()
+                                        .unwrap()
+                                        .contains_key(&connection_data.peer_public_key.unwrap().to_ssb_id())
+                                {
+                                    info!(
+                                        "peer {} is not in replication list and selective replication is enabled; dropping connection",
+                                        connection_data.peer_public_key.unwrap().to_ssb_id()
+                                    );
+
+                                    // TODO: I'm not sure this should be an actor. It might be
+                                    // better to have it return the `connection_data` so that
+                                    // it can then be passed to the `Disconnecting` event.
+                                    //
+                                    // Spawn the classic replication actor and await the result.
+                                    Broker::spawn(crate::actors::replication::classic::actor(
+                                        connection_data.to_owned(),
+                                    ))
+                                    .await;
+
+                                    // Send connection event message via the broker.
+                                    ch_broker
+                                        .send(BrokerEvent::new(
+                                            Destination::Broadcast,
+                                            BrokerMessage::Connection(ConnectionEvent::Disconnecting(connection_data.to_owned()))
+                                        ))
+                                        .await.unwrap();
+                                }
+
+                                // TODO: Attempt EBT replication, using classic replication
+                                    // as fallback.
+                            }
+                            ConnectionEvent::Disconnecting(connection_data) => {
+                                trace!(target: "connection-manager", "Disconnecting: {connection_data}");
+
+                                if let Some(stream) = &connection_data.stream {
+                                    // This may not be necessary; the connection should close when
+                                    // the stream is dropped.
+                                    stream.shutdown(Shutdown::Both).unwrap();
+                                }
+
+                                ch_broker
+                                    .send(BrokerEvent::new(
+                                        Destination::Broadcast,
+                                        BrokerMessage::Connection(ConnectionEvent::Disconnected(connection_data)),
+                                    ))
+                                    .await.unwrap();
+                            }
+                            ConnectionEvent::Disconnected(data) => {
+                                trace!(target: "connection-manager", "Disconnected: {data}");
+
+                                // Remove the peer from the list of connected peers.
+                                if let Some(public_key) = data.peer_public_key {
+                                CONNECTION_MANAGER
+                                    .write()
+                                    .await
+                                    .remove_connected_peer(public_key);
+                                }
+                            }
+                            ConnectionEvent::Error(data, err) => {
+                                trace!(target: "connection-manager", "Error: {data}: {err}");
+
+                                // Remove the peer from the list of connected peers.
+                                if let Some(public_key) = data.peer_public_key {
+                                CONNECTION_MANAGER
+                                    .write()
+                                    .await
+                                    .remove_connected_peer(public_key);
+
+                                }
+                            }
+                        }
                     }
                 },
             };

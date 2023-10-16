@@ -1,12 +1,6 @@
 use std::collections::hash_map::HashMap;
 
-use async_std::{
-    prelude::*,
-    sync::{Arc, Mutex},
-    task,
-    task::JoinHandle,
-};
-use core::any::Any;
+use async_std::{prelude::*, sync::Mutex, task, task::JoinHandle};
 use futures::{
     channel::{mpsc, oneshot},
     select_biased, FutureExt, SinkExt,
@@ -14,16 +8,26 @@ use futures::{
 use log::{info, trace};
 use once_cell::sync::Lazy;
 
-use crate::{actors::network::connection_manager::ConnectionEvent, Result};
+use crate::{
+    actors::{
+        muxrpc::{RpcBlobsGetEvent, RpcBlobsWantsEvent},
+        network::{connection_manager::ConnectionEvent, connection_scheduler::DialRequest},
+    },
+    storage::{blob::StoreBlobEvent, kv::StoreKvEvent},
+    Result,
+};
 
 #[derive(Debug)]
 pub struct Void {}
 
-// TODO: What if we make this into an enum and do away with `Arc`
-// and `Any`?
-//pub type BrokerMessage = Arc<dyn Any + Send + Sync>;
+#[derive(Debug, Clone)]
 pub enum BrokerMessage {
-    ConnectionEvent(ConnectionEvent),
+    Connection(ConnectionEvent),
+    Dial(DialRequest),
+    RpcBlobsGet(RpcBlobsGetEvent),
+    RpcBlobsWants(RpcBlobsWantsEvent),
+    StoreBlob(StoreBlobEvent),
+    StoreKv(StoreKvEvent),
 }
 
 pub type ChBrokerSend = mpsc::UnboundedSender<BrokerEvent>;
@@ -55,14 +59,8 @@ pub enum BrokerEvent {
 }
 
 impl BrokerEvent {
-    pub fn new<A>(to: Destination, any: A) -> Self
-    where
-        A: Any + Send + Sync,
-    {
-        BrokerEvent::Message {
-            to,
-            msg: Arc::new(any),
-        }
+    pub fn new(to: Destination, msg: BrokerMessage) -> Self {
+        BrokerEvent::Message { to, msg }
     }
 }
 

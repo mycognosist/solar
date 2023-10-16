@@ -22,10 +22,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-// TODO: Make this a tuple struct.
-pub enum RpcBlobsGetEvent {
-    Get(dto::BlobsGetIn),
-}
+pub struct RpcBlobsGetEvent(pub dto::BlobsGetIn);
 
 pub struct BlobsGetHandler<W>
 where
@@ -77,7 +74,7 @@ where
             RpcInput::Network(req_no, rpc::RecvMsg::RpcResponse(_type, res)) => {
                 return self.recv_rpc_response(api, *req_no, res).await;
             }
-            RpcInput::Message(BrokerMessage::RpcBlobsGet(RpcBlobsGetEvent::Get(req))) => {
+            RpcInput::Message(BrokerMessage::RpcBlobsGet(RpcBlobsGetEvent(req))) => {
                 return self.event_get(api, req).await;
             }
             _ => {}

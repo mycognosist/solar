@@ -13,7 +13,10 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 use crate::{
-    actors::muxrpc::handler::{RpcHandler, RpcInput},
+    actors::muxrpc::{
+        blobs_get::RpcBlobsGetEvent,
+        handler::{RpcHandler, RpcInput},
+    },
     broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination},
     config::{PEERS_TO_REPLICATE, RESYNC_CONFIG, SECRET_CONFIG},
     node::BLOB_STORE,
@@ -232,7 +235,7 @@ where
                 // blobstore.
                 for key in self.extract_blob_refs(&msg) {
                     if !BLOB_STORE.read().await.exists(&key) {
-                        let event = super::blobs_get::RpcBlobsGetEvent::Get(dto::BlobsGetIn {
+                        let event = RpcBlobsGetEvent(dto::BlobsGetIn {
                             key,
                             size: None,
                             max: None,

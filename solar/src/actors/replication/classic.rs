@@ -27,6 +27,7 @@ use crate::{
     broker::{
         ActorEndpoint, BrokerEvent, BrokerMessage, ChMsgRecv, ChSigRecv, Destination, BROKER,
     },
+    error::Error,
     Result,
 };
 
@@ -37,8 +38,10 @@ pub async fn actor(connection_data: ConnectionData) -> Result<()> {
     // Attempt replication.
     let replication_result = actor_inner(connection_data.to_owned()).await;
 
-    // TODO: Handle unwrap.
-    let peer_pk = connection_data.peer_public_key.unwrap().to_ssb_id();
+    let peer_pk = connection_data
+        .peer_public_key
+        .ok_or(Error::OptionIsNone)?
+        .to_ssb_id();
 
     match replication_result {
         Ok(connection_data) => {
@@ -77,10 +80,7 @@ pub async fn actor(connection_data: ConnectionData) -> Result<()> {
 }
 
 /// Spawn the replication loop and report on the connection outcome.
-//pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync>(
-pub async fn actor_inner(
-    connection_data: ConnectionData, // TODO: This might need to be `mut`.
-) -> Result<ConnectionData> {
+pub async fn actor_inner(connection_data: ConnectionData) -> Result<ConnectionData> {
     // Register the "replication" actor endpoint with the broker.
     let ActorEndpoint {
         ch_terminate,
@@ -95,20 +95,12 @@ pub async fn actor_inner(
     // replication loop after n consecutive idle seconds.
     let connection_idle_timeout_limit = CONNECTION_MANAGER.read().await.idle_timeout_limit;
 
-    /* TODO: Need to create separate `Replicate` and `Replicating` events.
-     *
-    // Send 'replicating' connection event message via the broker.
-    ch_broker
-        .send(BrokerEvent::new(
-            Destination::Broadcast,
-            BrokerMessage::Connection(ConnectionEvent::Replicating(connection_data.to_owned())),
-        ))
-        .await?;
-    */
-
-    let stream_reader = connection_data.stream.clone().unwrap();
-    let stream_writer = connection_data.stream.clone().unwrap();
-    let handshake = connection_data.handshake.clone().unwrap();
+    let stream_reader = connection_data.stream.clone().ok_or(Error::OptionIsNone)?;
+    let stream_writer = connection_data.stream.clone().ok_or(Error::OptionIsNone)?;
+    let handshake = connection_data
+        .handshake
+        .clone()
+        .ok_or(Error::OptionIsNone)?;
 
     // Spawn the replication loop (responsible for negotiating RPC requests).
     replication_loop(
@@ -117,7 +109,7 @@ pub async fn actor_inner(
         stream_writer,
         handshake,
         ch_terminate,
-        ch_msg.unwrap(),
+        ch_msg.ok_or(Error::OptionIsNone)?,
         connection_idle_timeout_limit,
     )
     .await?;
@@ -136,13 +128,9 @@ async fn replication_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send
     mut ch_msg: ChMsgRecv,
     connection_idle_timeout_limit: u8,
 ) -> Result<()> {
-    // TODO: Handle the unwrap.
-    //
     // Parse the peer public key from the handshake.
     let peer_ssb_id = handshake.peer_pk.to_ssb_id();
 
-    // TODO: Handle the unwraps.
-    //
     // Instantiate a box stream and split it into reader and writer streams.
     let (box_stream_read, box_stream_write) =
         BoxStream::from_handshake(stream_reader, stream_writer, handshake, 0x8000)

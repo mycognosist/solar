@@ -11,8 +11,7 @@ use log::info;
 
 use crate::{
     actors::network::connection_manager::{ConnectionEvent, CONNECTION_MANAGER},
-    // TODO: Replace this with explicit imports.
-    broker::*,
+    broker::{ActorEndpoint, Broker, BrokerEvent, BrokerMessage, Destination, BROKER},
     config::{NETWORK_KEY, PEERS_TO_REPLICATE},
     Result,
 };

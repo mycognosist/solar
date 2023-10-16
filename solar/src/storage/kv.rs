@@ -23,11 +23,10 @@ const PREFIX_BLOB: u8 = 3u8;
 /// Prefix for a key to a peer.
 const PREFIX_PEER: u8 = 4u8;
 
+/// The feed belonging to the given SSB ID has changed
+/// (ie. a new message has been appended to the feed).
 #[derive(Debug, Clone)]
-// TODO: Make this a tuple struct.
-pub enum StoreKvEvent {
-    IdChanged(String),
-}
+pub struct StoreKvEvent(pub String);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlobStatus {
@@ -289,7 +288,7 @@ impl KvStorage {
         // key has been updated.
         let broker_msg = BrokerEvent::new(
             Destination::Broadcast,
-            BrokerMessage::StoreKv(StoreKvEvent::IdChanged(author)),
+            BrokerMessage::StoreKv(StoreKvEvent(author)),
         );
 
         // Matching on the error here (instead of unwrapping) allows us to

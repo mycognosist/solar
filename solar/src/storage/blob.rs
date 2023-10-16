@@ -9,11 +9,9 @@ use sha2::{Digest, Sha256};
 
 use crate::broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination};
 
+/// A blob has been added to the store.
 #[derive(Debug, Clone)]
-// TODO: Make this a tuple struct.
-pub enum StoreBlobEvent {
-    Added(String),
-}
+pub struct StoreBlobEvent(pub String);
 
 #[derive(Default)]
 pub struct BlobStorage {
@@ -60,7 +58,7 @@ impl BlobStorage {
 
         let broker_msg = BrokerEvent::new(
             Destination::Broadcast,
-            BrokerMessage::StoreBlob(StoreBlobEvent::Added(id.clone())),
+            BrokerMessage::StoreBlob(StoreBlobEvent(id.clone())),
         );
 
         self.ch_broker

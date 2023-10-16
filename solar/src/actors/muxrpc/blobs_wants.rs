@@ -20,9 +20,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub enum RpcBlobsWantsEvent {
-    BroadcastWants(Vec<(String, i64)>),
-}
+pub struct RpcBlobsWantsEvent(Vec<(String, i64)>);
 
 #[derive(PartialEq)]
 enum Wants {
@@ -154,9 +152,9 @@ where
                 }
             }
             RpcInput::Message(msg) => {
-                if let BrokerMessage::RpcBlobsWants(RpcBlobsWantsEvent::BroadcastWants(ids)) = msg {
+                if let BrokerMessage::RpcBlobsWants(RpcBlobsWantsEvent(ids)) = msg {
                     return self.event_wants_broadcast(api, ids).await;
-                } else if let BrokerMessage::StoreBlob(StoreBlobEvent::Added(blob_id)) = msg {
+                } else if let BrokerMessage::StoreBlob(StoreBlobEvent(blob_id)) = msg {
                     return self.event_stoblob_added(api, blob_id).await;
                 }
             }
@@ -282,7 +280,7 @@ where
         // broadcast other peers with the blobs I don't have
         let broker_msg = BrokerEvent::new(
             Destination::Broadcast,
-            BrokerMessage::RpcBlobsWants(RpcBlobsWantsEvent::BroadcastWants(broadcast)),
+            BrokerMessage::RpcBlobsWants(RpcBlobsWantsEvent(broadcast)),
         );
         ch_broker.send(broker_msg).await.unwrap();
 

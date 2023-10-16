@@ -37,6 +37,8 @@ pub enum Error {
     MessageType(String),
     /// SSB RPC error.
     MuxRpc(rpc::Error),
+    /// None error (expected an `Option` to be `Some`).
+    OptionIsNone,
     /// Secret handshake error.
     SecretHandshake(handshake::async_std::Error),
     /// Serde CBOR error.
@@ -80,6 +82,7 @@ impl fmt::Display for Error {
             Error::LanDiscovery(err) => write!(f, "LAN UDP discovery error: {err}"),
             Error::MessageType(err) => write!(f, "SSB message type field error: {err}"),
             Error::MuxRpc(err) => write!(f, "MUXRPC error: {err}"),
+            Error::OptionIsNone => write!(f, "None error: expected Some"),
             Error::SecretHandshake(err) => write!(f, "Secret handshake error: {err}"),
             Error::SerdeCbor(err) => write!(f, "Serde CBOR error: {err}"),
             Error::SerdeJson(err) => write!(f, "Serde JSON error: {err}"),

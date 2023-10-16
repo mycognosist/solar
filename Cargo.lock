@@ -1065,8 +1065,6 @@ dependencies = [
 [[package]]
 name = "kuska-handshake"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e33da4b69f23c2ece0b3e729d079cebdc2c0206e493e42f510f500ad81c631d5"
 dependencies = [
  "futures",
  "hex",
@@ -1089,7 +1087,6 @@ dependencies = [
 [[package]]
 name = "kuska-ssb"
 version = "0.4.2"
-source = "git+https://github.com/Kuska-ssb/ssb?branch=master#7e1c633136380e8d83e6d239ed3c67f53f68abe9"
 dependencies = [
  "async-std",
  "async-stream",

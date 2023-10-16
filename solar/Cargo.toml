@@ -17,7 +17,8 @@ futures = "0.3"
 hex = "0.4.0"
 jsonrpsee = { version = "0.18.2", features = ["server"] }
 kuska-sodiumoxide = "0.2.5-0"
-kuska-ssb = { git =  "https://github.com/Kuska-ssb/ssb", branch = "master" }
+#kuska-ssb = { git =  "https://github.com/Kuska-ssb/ssb", branch = "master" }
+kuska-ssb = { path =  "../../ssb" }
 log = "0.4"
 once_cell = "1.16"
 rand = "0.8"

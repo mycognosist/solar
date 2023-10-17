@@ -135,6 +135,7 @@ pub async fn actor(
                         connection_data,
                         identity,
                         selective_replication,
+                        true, // Listener.
                     )),
                 ))
                 .await?;

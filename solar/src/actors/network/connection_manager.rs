@@ -9,10 +9,10 @@ use async_std::{
 use futures::{select_biased, stream::StreamExt, FutureExt, SinkExt};
 use kuska_ssb::{
     crypto::{ed25519, ToSsbId},
-    handshake::async_std::handshake_client,
+    handshake::async_std::{handshake_client, handshake_server},
     keystore::OwnedIdentity,
 };
-use log::{error, info, trace};
+use log::{debug, error, info, trace};
 use once_cell::sync::Lazy;
 
 use crate::{
@@ -33,7 +33,7 @@ pub static CONNECTION_MANAGER: Lazy<Arc<RwLock<ConnectionManager>>> =
 #[derive(Debug, Clone)]
 pub enum ConnectionEvent {
     Connecting(ConnectionData, OwnedIdentity, bool),
-    Handshaking(ConnectionData, OwnedIdentity, bool),
+    Handshaking(ConnectionData, OwnedIdentity, bool, bool),
     Connected(ConnectionData, bool),
     Replicating(ConnectionData, bool),
     Disconnecting(ConnectionData),
@@ -135,9 +135,7 @@ impl ConnectionManager {
                 ch_broker
                     .send(BrokerEvent::new(
                         Destination::Broadcast,
-                        BrokerMessage::Connection(ConnectionEvent::Disconnecting(
-                            connection_data.to_owned(),
-                        )),
+                        BrokerMessage::Connection(ConnectionEvent::Disconnecting(connection_data)),
                     ))
                     .await?;
             } else if let Some(addr) = &connection_data.peer_addr {
@@ -150,9 +148,10 @@ impl ConnectionManager {
                         .send(BrokerEvent::new(
                             Destination::Broadcast,
                             BrokerMessage::Connection(ConnectionEvent::Handshaking(
-                                connection_data.to_owned(),
-                                identity.to_owned(),
+                                connection_data,
+                                identity,
                                 selective_replication,
+                                false, // Dialer.
                             )),
                         ))
                         .await?;
@@ -167,19 +166,30 @@ impl ConnectionManager {
         mut connection_data: ConnectionData,
         identity: OwnedIdentity,
         selective_replication: bool,
+        listener: bool,
         mut ch_broker: ChBrokerSend,
     ) -> Result<()> {
         // Parse the public key and secret key from the SSB identity.
-        let OwnedIdentity { pk, sk, .. } = identity.to_owned();
+        let OwnedIdentity { pk, sk, .. } = identity;
 
         // Define the network key to be used for the secret handshake.
         let network_key = NETWORK_KEY.get().ok_or(Error::OptionIsNone)?.to_owned();
         let mut stream = connection_data.stream.clone().ok_or(Error::OptionIsNone)?;
-        let peer_public_key = connection_data.peer_public_key.ok_or(Error::OptionIsNone)?;
 
-        // Attempt a secret handshake.
-        let handshake = handshake_client(&mut stream, network_key, pk, sk, peer_public_key).await?;
+        // Attempt a secret handshake as server or client.
+        let handshake = if listener {
+            debug!("Attempting secret handshake as server...");
+            handshake_server(&mut stream, network_key, pk, sk).await?
+        } else {
+            let peer_public_key = connection_data.peer_public_key.ok_or(Error::OptionIsNone)?;
+            debug!("Attempting secret handshake as client...");
+            handshake_client(&mut stream, network_key, pk, sk, peer_public_key).await?
+        };
 
+        debug!("Secret handshake complete");
+
+        // `handshake.peer_pk` is of type `ed25519::PublicKey`.
+        connection_data.peer_public_key = Some(handshake.peer_pk);
         connection_data.handshake = Some(handshake);
 
         // Send 'connected' connection event message via the broker.
@@ -216,7 +226,7 @@ impl ConnectionManager {
             .send(BrokerEvent::new(
                 Destination::Broadcast,
                 BrokerMessage::Connection(ConnectionEvent::Replicating(
-                    connection_data.to_owned(),
+                    connection_data,
                     selective_replication,
                 )),
             ))
@@ -229,6 +239,11 @@ impl ConnectionManager {
         connection_data: ConnectionData,
         selective_replication: bool,
     ) -> Result<()> {
+        let peer_public_key = connection_data
+            .peer_public_key
+            .ok_or(Error::OptionIsNone)?
+            .to_ssb_id();
+
         // Shutdown the connection if the peer is not in the list of peers
         // to be replicated, unless replication is set to nonselective.
         // This ensures we do not replicate with unknown peers.
@@ -236,19 +251,17 @@ impl ConnectionManager {
             & !PEERS_TO_REPLICATE
                 .get()
                 .ok_or(Error::OptionIsNone)?
-                .contains_key(&connection_data.peer_public_key.unwrap().to_ssb_id())
+                .contains_key(&peer_public_key)
         {
             info!(
                 "peer {} is not in replication list and selective replication is enabled; dropping connection",
-                connection_data.peer_public_key.unwrap().to_ssb_id()
+                peer_public_key
             );
-
-            // Spawn the classic replication actor and await the result.
-            Broker::spawn(crate::actors::replication::classic::actor(
-                connection_data.to_owned(),
-            ))
-            .await;
         }
+
+        debug!("Attempting classic replication with peer...");
+        // Spawn the classic replication actor and await the result.
+        Broker::spawn(crate::actors::replication::classic::actor(connection_data)).await;
 
         // TODO: Attempt EBT replication, using classic replication
         // as fallback.
@@ -323,13 +336,14 @@ impl ConnectionManager {
                                     error!("Error while handling connecting event: {}", err)
                                 }
                             }
-                            ConnectionEvent::Handshaking(connection_data, identity, selective_replication) => {
+                            ConnectionEvent::Handshaking(connection_data, identity, selective_replication, listener) => {
                                 trace!(target: "connection-manager", "Handshaking: {connection_data}");
 
                                 if let Err(err) = ConnectionManager::handle_handshaking(
                                     connection_data,
                                     identity,
                                     selective_replication,
+                                    listener,
                                     ch_broker.clone()
                                 ).await {
                                     error!("Error while handling handshaking event: {}", err)

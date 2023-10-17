@@ -1,3 +1,14 @@
+//! Event-driven connection manager.
+//!
+//! The connection manager serves to register new TCP connections and handle
+//! each connection as it passes through several phases (eg. connection
+//! establishment, handshake, replication etc.).
+//!
+//! An event loop listens for connection events and executes handlers for each.
+//!
+//! Connection data, including the underlying TCP stream, is passed around with
+//! each event variant - allowing the handlers to take ownership of the data.
+
 use std::{collections::HashSet, net::Shutdown};
 
 use async_std::{

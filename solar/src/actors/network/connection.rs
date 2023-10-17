@@ -1,3 +1,10 @@
+//! Handle inbound and outbound TCP connections.
+//!
+//! Inbound connections originate in the TCP server module, while outbound
+//! connection attempts are intiated by the connection scheduler module.
+//!
+//! Connection events are emitted and handled by the connection manager.
+
 use std::fmt::Display;
 
 use async_std::net::TcpStream;

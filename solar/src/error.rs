@@ -38,6 +38,7 @@ pub enum Error {
     /// SSB RPC error.
     MuxRpc(rpc::Error),
     /// None error (expected an `Option` to be `Some`).
+    // TODO: Add context String.
     OptionIsNone,
     /// Secret handshake error.
     SecretHandshake(handshake::async_std::Error),

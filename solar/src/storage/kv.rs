@@ -115,7 +115,7 @@ impl KvStorage {
 
     /// Get the status of a blob with the given ID.
     pub fn get_blob(&self, blob_id: &str) -> Result<Option<BlobStatus>> {
-        let db = self.db.as_ref().unwrap();
+        let db = self.db.as_ref().ok_or(Error::OptionIsNone)?;
         if let Some(raw) = db.get(Self::key_blob(blob_id))? {
             Ok(serde_cbor::from_slice(&raw)?)
         } else {
@@ -125,7 +125,7 @@ impl KvStorage {
 
     /// Set the status of a blob with the given ID.
     pub fn set_blob(&self, blob_id: &str, blob: &BlobStatus) -> Result<()> {
-        let db = self.db.as_ref().unwrap();
+        let db = self.db.as_ref().ok_or(Error::OptionIsNone)?;
         let raw = serde_cbor::to_vec(blob)?;
         db.insert(Self::key_blob(blob_id), raw)?;
 
@@ -136,7 +136,7 @@ impl KvStorage {
     pub fn get_pending_blobs(&self) -> Result<Vec<String>> {
         let mut list = Vec::new();
 
-        let db = self.db.as_ref().unwrap();
+        let db = self.db.as_ref().ok_or(Error::OptionIsNone)?;
         let scan_key: &[u8] = &[PREFIX_BLOB];
         for item in db.range(scan_key..) {
             let (k, v) = item?;
@@ -152,7 +152,7 @@ impl KvStorage {
     /// Get the sequence number of the latest message in the feed authored by
     /// the peer with the given public key.
     pub fn get_latest_seq(&self, user_id: &str) -> Result<Option<u64>> {
-        let db = self.db.as_ref().unwrap();
+        let db = self.db.as_ref().ok_or(Error::OptionIsNone)?;
         let key = Self::key_latest_seq(user_id);
         let seq = if let Some(value) = db.get(key)? {
             let mut u64_buffer = [0u8; 8];
@@ -168,7 +168,7 @@ impl KvStorage {
     /// Get the message KVT (Key Value Timestamp) for the given author and
     /// message sequence number.
     pub fn get_msg_kvt(&self, user_id: &str, msg_seq: u64) -> Result<Option<MessageKvt>> {
-        let db = self.db.as_ref().unwrap();
+        let db = self.db.as_ref().ok_or(Error::OptionIsNone)?;
         if let Some(raw) = db.get(Self::key_msg_kvt(user_id, msg_seq))? {
             Ok(Some(MessageKvt::from_slice(&raw)?))
         } else {
@@ -178,13 +178,13 @@ impl KvStorage {
 
     /// Get the message value for the given message ID (key).
     pub fn get_msg_val(&self, msg_id: &str) -> Result<Option<MessageValue>> {
-        let db = self.db.as_ref().unwrap();
+        let db = self.db.as_ref().ok_or(Error::OptionIsNone)?;
 
         if let Some(raw) = db.get(Self::key_msg_val(msg_id))? {
             let msg_ref = serde_cbor::from_slice::<PubKeyAndSeqNum>(&raw)?;
             let msg = self
                 .get_msg_kvt(&msg_ref.pub_key, msg_ref.seq_num)?
-                .unwrap()
+                .ok_or(Error::OptionIsNone)?
                 .into_message()?;
             Ok(Some(msg))
         } else {
@@ -197,7 +197,7 @@ impl KvStorage {
         let latest_msg = if let Some(last_id) = self.get_latest_seq(user_id)? {
             Some(
                 self.get_msg_kvt(user_id, last_id)?
-                    .unwrap()
+                    .ok_or(Error::OptionIsNone)?
                     .into_message()?,
             )
         } else {
@@ -210,8 +210,7 @@ impl KvStorage {
     /// Add the public key and latest sequence number of a peer to the list of
     /// peers.
     pub async fn set_peer(&self, user_id: &str, latest_seq: u64) -> Result<()> {
-        // TODO: Replace unwrap with none error and try operator.
-        let db = self.db.as_ref().unwrap();
+        let db = self.db.as_ref().ok_or(Error::OptionIsNone)?;
         db.insert(Self::key_peer(user_id), &latest_seq.to_be_bytes()[..])?;
 
         // TODO: Should we be flushing here?
@@ -224,7 +223,7 @@ impl KvStorage {
     /// Return the public key and latest sequence number for all peers in the
     /// database.
     pub async fn get_peers(&self) -> Result<Vec<PubKeyAndSeqNum>> {
-        let db = self.db.as_ref().unwrap();
+        let db = self.db.as_ref().ok_or(Error::OptionIsNone)?;
         let mut peers = Vec::new();
 
         // Use the generic peer prefix to return an iterator over all peers.
@@ -249,14 +248,12 @@ impl KvStorage {
         debug!("Appending message to feed in database");
         let seq_num = self.get_latest_seq(msg_val.author())?.map_or(0, |num| num) + 1;
 
-        // TODO: We should really be performing more comprehensive validation.
-        // Are there other checks in place behind the scenes?
         if msg_val.sequence() != seq_num {
             return Err(Error::InvalidSequence);
         }
 
         let author = msg_val.author().to_owned();
-        let db = self.db.as_ref().unwrap();
+        let db = self.db.as_ref().ok_or(Error::OptionIsNone)?;
 
         let msg_ref = serde_cbor::to_vec(&PubKeyAndSeqNum {
             pub_key: author.clone(),
@@ -294,7 +291,13 @@ impl KvStorage {
         // Matching on the error here (instead of unwrapping) allows us to
         // write unit tests for `append_feed`; a case where we do not have
         // a broker deployed to receive the event message.
-        if let Err(err) = self.ch_broker.as_ref().unwrap().send(broker_msg).await {
+        if let Err(err) = self
+            .ch_broker
+            .as_ref()
+            .ok_or(Error::OptionIsNone)?
+            .send(broker_msg)
+            .await
+        {
             warn!(
                 "Failed to notify broker of message appended to kv store: {}",
                 err
@@ -314,10 +317,10 @@ impl KvStorage {
             for msg_seq in 1..=latest_seq {
                 // Get the message KVT for the given author and message
                 // sequence number and add it to the feed vector.
-                //
-                // TODO: consider handling the `None` case instead of
-                // unwrapping.
-                feed.push(self.get_msg_kvt(user_id, msg_seq)?.unwrap())
+                feed.push(
+                    self.get_msg_kvt(user_id, msg_seq)?
+                        .ok_or(Error::OptionIsNone)?,
+                )
             }
         }
 

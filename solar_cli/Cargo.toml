@@ -19,7 +19,8 @@ clap = { version = "4.1.8", features = ["derive"] }
 env_logger = "0.10"
 hex = "0.4.0"
 kuska-sodiumoxide = "0.2.5-0"
-kuska-ssb = { git =  "https://github.com/Kuska-ssb/ssb", branch = "master" }
+#kuska-ssb = { git =  "https://github.com/Kuska-ssb/ssb", branch = "master" }
+kuska-ssb = { path =  "../../ssb" }
 log = "0.4"
 url = "2.3"
 

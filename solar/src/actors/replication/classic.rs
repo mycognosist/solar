@@ -7,7 +7,7 @@ use async_std::{
 use futures::{pin_mut, select_biased, stream::StreamExt, FutureExt, SinkExt};
 use kuska_ssb::{
     api::ApiCaller,
-    crypto::{ed25519, ToSsbId},
+    crypto::ToSsbId,
     handshake::{async_std::BoxStream, HandshakeComplete},
     rpc::{RpcReader, RpcWriter},
 };
@@ -27,30 +27,25 @@ use crate::{
     broker::{
         ActorEndpoint, BrokerEvent, BrokerMessage, ChMsgRecv, ChSigRecv, Destination, BROKER,
     },
+    error::Error,
     Result,
 };
 
-pub async fn actor<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync>(
-    connection_data: ConnectionData,
-    stream_reader: R,
-    stream_writer: W,
-    handshake: HandshakeComplete,
-    peer_pk: ed25519::PublicKey,
-) -> Result<()> {
+//pub async fn actor<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync>(
+pub async fn actor(connection_data: ConnectionData) -> Result<()> {
     let mut ch_broker = BROKER.lock().await.create_sender();
 
     // Attempt replication.
-    let replication_result = actor_inner(
-        connection_data.to_owned(),
-        stream_reader,
-        stream_writer,
-        handshake,
-    )
-    .await;
+    let replication_result = actor_inner(connection_data.to_owned()).await;
+
+    let peer_pk = connection_data
+        .peer_public_key
+        .ok_or(Error::OptionIsNone)?
+        .to_ssb_id();
 
     match replication_result {
         Ok(connection_data) => {
-            info!("👋 finished replication with {}", peer_pk.to_ssb_id());
+            info!("👋 finished replication with {}", peer_pk);
 
             // Send 'disconnecting' connection event message via the broker.
             ch_broker
@@ -65,8 +60,7 @@ pub async fn actor<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
         Err(err) => {
             warn!(
                 "💀 replication with {} terminated with error {:?}",
-                peer_pk.to_ssb_id(),
-                err
+                peer_pk, err
             );
 
             // Send 'error' connection event message via the broker.
@@ -86,12 +80,7 @@ pub async fn actor<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync
 }
 
 /// Spawn the replication loop and report on the connection outcome.
-pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync>(
-    connection_data: ConnectionData,
-    mut stream_reader: R,
-    mut stream_writer: W,
-    handshake: HandshakeComplete,
-) -> Result<ConnectionData> {
+pub async fn actor_inner(connection_data: ConnectionData) -> Result<ConnectionData> {
     // Register the "replication" actor endpoint with the broker.
     let ActorEndpoint {
         ch_terminate,
@@ -106,22 +95,21 @@ pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send 
     // replication loop after n consecutive idle seconds.
     let connection_idle_timeout_limit = CONNECTION_MANAGER.read().await.idle_timeout_limit;
 
-    // Send 'replicating' connection event message via the broker.
-    ch_broker
-        .send(BrokerEvent::new(
-            Destination::Broadcast,
-            BrokerMessage::Connection(ConnectionEvent::Replicating(connection_data.to_owned())),
-        ))
-        .await?;
+    let stream_reader = connection_data.stream.clone().ok_or(Error::OptionIsNone)?;
+    let stream_writer = connection_data.stream.clone().ok_or(Error::OptionIsNone)?;
+    let handshake = connection_data
+        .handshake
+        .clone()
+        .ok_or(Error::OptionIsNone)?;
 
     // Spawn the replication loop (responsible for negotiating RPC requests).
     replication_loop(
         actor_id,
-        &mut stream_reader,
-        &mut stream_writer,
+        stream_reader,
+        stream_writer,
         handshake,
         ch_terminate,
-        ch_msg.unwrap(),
+        ch_msg.ok_or(Error::OptionIsNone)?,
         connection_idle_timeout_limit,
     )
     .await?;

@@ -205,9 +205,9 @@ pub async fn actor(peers: Vec<(PublicKey, String)>) -> Result<()> {
             },
             // Received a message from the connection manager via the broker.
             msg = broker_msg_ch.next().fuse() => {
-                if let Some(BrokerMessage::Connection(conn_event)) = msg {
-                    match conn_event {
-                        ConnectionEvent::Replicating(data) => {
+                if let Some(BrokerMessage::Connection(event)) = msg {
+                    match event {
+                        ConnectionEvent::Replicating(data, _selective_replication) => {
                             // This connection was "successful".
                             // Push the peer to the back of the eager queue.
                             if let Some(public_key) = data.peer_public_key {

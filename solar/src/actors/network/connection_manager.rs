@@ -27,7 +27,13 @@ use log::{debug, error, info, trace};
 use once_cell::sync::Lazy;
 
 use crate::{
-    actors::network::connection::ConnectionData,
+    actors::{
+        network::{
+            connection,
+            connection::{ConnectionData, TcpConnection},
+        },
+        replication::ebt::EbtEvent,
+    },
     broker::{
         ActorEndpoint, Broker, BrokerEvent, BrokerMessage, ChBrokerSend, Destination, BROKER,
     },
@@ -40,13 +46,24 @@ use crate::{
 pub static CONNECTION_MANAGER: Lazy<Arc<RwLock<ConnectionManager>>> =
     Lazy::new(|| Arc::new(RwLock::new(ConnectionManager::new())));
 
+type EnableSelectiveReplication = bool;
+type IsListener = bool;
+
 /// Connection events with associated connection data.
 #[derive(Debug, Clone)]
 pub enum ConnectionEvent {
-    Connecting(ConnectionData, OwnedIdentity, bool),
-    Handshaking(ConnectionData, OwnedIdentity, bool, bool),
-    Connected(ConnectionData, bool),
-    Replicating(ConnectionData, bool),
+    LanDiscovery(TcpConnection, OwnedIdentity, EnableSelectiveReplication),
+    Connecting(ConnectionData, OwnedIdentity, EnableSelectiveReplication),
+    Handshaking(
+        ConnectionData,
+        OwnedIdentity,
+        EnableSelectiveReplication,
+        IsListener,
+    ),
+    Connected(ConnectionData, EnableSelectiveReplication, IsListener),
+    Replicate(ConnectionData, EnableSelectiveReplication, IsListener),
+    ReplicatingEbt(ConnectionData, IsListener),
+    ReplicatingClassic(ConnectionData),
     Disconnecting(ConnectionData),
     Disconnected(ConnectionData),
     Error(ConnectionData, String),
@@ -123,10 +140,42 @@ impl ConnectionManager {
         self.last_connection_id
     }
 
+    async fn handle_lan_discovery(
+        tcp_connection: TcpConnection,
+        identity: OwnedIdentity,
+        selective_replication: EnableSelectiveReplication,
+    ) -> Result<()> {
+        // Check if we are already connected to the selected peer.
+        //
+        // If yes, ignore the LAN discovery event which arose from a received
+        // UDP broadcast message.
+        if let TcpConnection::Dial { public_key, .. } = &tcp_connection {
+            if CONNECTION_MANAGER
+                .read()
+                .await
+                .contains_connected_peer(public_key)
+            {
+                info!("peer {} is already connected", public_key.to_ssb_id());
+            } else {
+                // Spawn a connection actor with the given connection parameters.
+                //
+                // The connection actor is responsible for initiating the
+                // outbound TCP connection.
+                Broker::spawn(connection::actor(
+                    tcp_connection,
+                    identity,
+                    selective_replication,
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     async fn handle_connecting(
         mut connection_data: ConnectionData,
         identity: OwnedIdentity,
-        selective_replication: bool,
+        selective_replication: EnableSelectiveReplication,
         mut ch_broker: ChBrokerSend,
     ) -> Result<()> {
         // Check if we are already connected to the selected peer.
@@ -176,8 +225,8 @@ impl ConnectionManager {
     async fn handle_handshaking(
         mut connection_data: ConnectionData,
         identity: OwnedIdentity,
-        selective_replication: bool,
-        listener: bool,
+        selective_replication: EnableSelectiveReplication,
+        listener: IsListener,
         mut ch_broker: ChBrokerSend,
     ) -> Result<()> {
         // Parse the public key and secret key from the SSB identity.
@@ -210,6 +259,7 @@ impl ConnectionManager {
                 BrokerMessage::Connection(ConnectionEvent::Connected(
                     connection_data,
                     selective_replication,
+                    listener,
                 )),
             ))
             .await?;
@@ -219,7 +269,8 @@ impl ConnectionManager {
 
     async fn handle_connected(
         connection_data: ConnectionData,
-        selective_replication: bool,
+        selective_replication: EnableSelectiveReplication,
+        listener: IsListener,
         mut ch_broker: ChBrokerSend,
     ) -> Result<()> {
         // Add the peer to the list of connected peers.
@@ -232,13 +283,14 @@ impl ConnectionManager {
                 .insert_connected_peer(public_key);
         }
 
-        // Send 'replicating' connection event message via the broker.
+        // Send 'replicate' connection event message via the broker.
         ch_broker
             .send(BrokerEvent::new(
                 Destination::Broadcast,
-                BrokerMessage::Connection(ConnectionEvent::Replicating(
+                BrokerMessage::Connection(ConnectionEvent::Replicate(
                     connection_data,
                     selective_replication,
+                    listener,
                 )),
             ))
             .await?;
@@ -246,9 +298,11 @@ impl ConnectionManager {
         Ok(())
     }
 
-    async fn handle_replicating(
+    async fn handle_replicate(
         connection_data: ConnectionData,
-        selective_replication: bool,
+        selective_replication: EnableSelectiveReplication,
+        listener: IsListener,
+        mut ch_broker: ChBrokerSend,
     ) -> Result<()> {
         let peer_public_key = connection_data
             .peer_public_key
@@ -268,14 +322,66 @@ impl ConnectionManager {
                 "peer {} is not in replication list and selective replication is enabled; dropping connection",
                 peer_public_key
             );
+
+            // Send 'disconnecting' connection event message via the broker.
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    BrokerMessage::Connection(ConnectionEvent::Disconnecting(connection_data)),
+                ))
+                .await?;
+        } else {
+            // Send 'replicating ebt' connection event message via the broker.
+            //
+            // If the EBT replication attempt is unsuccessful, the EBT replication
+            // actor will emit a `ConnectionEvent::ReplicatingClassic` message.
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    BrokerMessage::Connection(ConnectionEvent::ReplicatingEbt(
+                        connection_data,
+                        listener,
+                    )),
+                ))
+                .await?;
         }
 
+        Ok(())
+    }
+
+    async fn handle_replicating_classic(connection_data: ConnectionData) -> Result<()> {
         debug!("Attempting classic replication with peer...");
+
         // Spawn the classic replication actor and await the result.
         Broker::spawn(crate::actors::replication::classic::actor(connection_data)).await;
 
-        // TODO: Attempt EBT replication, using classic replication
-        // as fallback.
+        Ok(())
+    }
+
+    async fn handle_replicating_ebt(
+        connection_data: ConnectionData,
+        listener: IsListener,
+        mut ch_broker: ChBrokerSend,
+    ) -> Result<()> {
+        debug!("Attempting EBT replication with peer...");
+
+        // The listener (aka. responder or server) waits for an EBT session to
+        // be requested by the client (aka. requestor or dialer).
+        if listener {
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    BrokerMessage::Ebt(EbtEvent::WaitForSessionRequest(connection_data)),
+                ))
+                .await?;
+        } else {
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    BrokerMessage::Ebt(EbtEvent::RequestSession(connection_data)),
+                ))
+                .await?;
+        }
 
         Ok(())
     }
@@ -299,6 +405,7 @@ impl ConnectionManager {
 
         Ok(())
     }
+
     /// Start the connection manager event loop.
     ///
     /// Listen for connection event messages via the broker and update
@@ -335,6 +442,17 @@ impl ConnectionManager {
                 msg = broker_msg_ch.next().fuse() => {
                     if let Some(BrokerMessage::Connection(event)) = msg {
                         match event {
+                            ConnectionEvent::LanDiscovery(tcp_connection, identity, selective_replication) => {
+                                trace!(target: "connection-manager", "LAN discovery: {}", tcp_connection );
+
+                                if let Err(err) = ConnectionManager::handle_lan_discovery(
+                                    tcp_connection,
+                                    identity,
+                                    selective_replication,
+                                ).await {
+                                    error!("Error while handling 'lan discovery' event: {}", err)
+                                }
+                            }
                             ConnectionEvent::Connecting(connection_data, identity, selective_replication,) => {
                                 trace!(target: "connection-manager", "Connecting: {connection_data}");
 
@@ -344,7 +462,7 @@ impl ConnectionManager {
                                     selective_replication,
                                     ch_broker.clone()
                                 ).await {
-                                    error!("Error while handling connecting event: {}", err)
+                                    error!("Error while handling 'connecting' event: {}", err)
                                 }
                             }
                             ConnectionEvent::Handshaking(connection_data, identity, selective_replication, listener) => {
@@ -357,28 +475,51 @@ impl ConnectionManager {
                                     listener,
                                     ch_broker.clone()
                                 ).await {
-                                    error!("Error while handling handshaking event: {}", err)
+                                    error!("Error while handling 'handshaking' event: {}", err)
                                 }
                             }
-                            ConnectionEvent::Connected(connection_data, selective_replication) => {
+                            ConnectionEvent::Connected(connection_data, selective_replication, listener) => {
                                 trace!(target: "connection-manager", "Connected: {connection_data}");
 
                                 if let Err(err) = ConnectionManager::handle_connected(
                                     connection_data,
                                     selective_replication,
+                                    listener,
                                     ch_broker.clone()
                                 ).await {
-                                    error!("Error while handling connected event: {}", err)
+                                    error!("Error while handling 'connected' event: {}", err)
                                 }
                             }
-                            ConnectionEvent::Replicating(connection_data, selective_replication) => {
-                                trace!(target: "connection-manager", "Replicating: {connection_data}");
+                            ConnectionEvent::Replicate(connection_data, selective_replication, listener) => {
+                                trace!(target: "connection-manager", "Replicate: {connection_data}");
 
-                                if let Err(err) = ConnectionManager::handle_replicating(
+                                if let Err(err) = ConnectionManager::handle_replicate(
                                     connection_data,
                                     selective_replication,
+                                    listener,
+                                    ch_broker.clone()
                                 ).await {
-                                    error!("Error while handling replicating event: {}", err)
+                                    error!("Error while handling 'replicate' event: {}", err)
+                                }
+                            }
+                            ConnectionEvent::ReplicatingClassic(connection_data) => {
+                                trace!(target: "connection-manager", "Replicating classic: {connection_data}");
+
+                                if let Err(err) = ConnectionManager::handle_replicating_classic(
+                                    connection_data,
+                                ).await {
+                                    error!("Error while handling 'replicating classic' event: {}", err)
+                                }
+                            }
+                            ConnectionEvent::ReplicatingEbt(connection_data, listener) => {
+                                trace!(target: "connection-manager", "Replicating EBT: {connection_data}");
+
+                                if let Err(err) = ConnectionManager::handle_replicating_ebt(
+                                    connection_data,
+                                    listener,
+                                    ch_broker.clone()
+                                ).await {
+                                    error!("Error while handling 'replicating EBT' event: {}", err)
                                 }
                             }
                             ConnectionEvent::Disconnecting(connection_data) => {

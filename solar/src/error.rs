@@ -1,4 +1,4 @@
-use std::{fmt, io, net};
+use std::{fmt, io, net, num};
 
 use futures::channel::mpsc;
 use jsonrpsee::types::error::ErrorObjectOwned as JsonRpcErrorOwned;
@@ -50,6 +50,8 @@ pub enum Error {
     SerializeToml(ser::Error),
     /// SSB API error.
     SsbApi(api::Error),
+    /// TryFromInt error.
+    TryFromInt(num::TryFromIntError),
     /// URL parsing error.
     UrlParse(url::ParseError),
     /// SSB message validation error.
@@ -89,6 +91,7 @@ impl fmt::Display for Error {
             Error::SerdeJson(err) => write!(f, "Serde JSON error: {err}"),
             Error::SerializeToml(err) => write!(f, "Failed to serialize TOML: {err}"),
             Error::SsbApi(err) => write!(f, "SSB API error: {err}"),
+            Error::TryFromInt(err) => write!(f, "Integer conversion error: {err}"),
             Error::UrlParse(err) => write!(f, "Failed to parse URL: {err}"),
             Error::Validation(err) => write!(f, "Message validation error: {err}"),
             Error::Other(err) => write!(f, "Uncategorized error: {err}"),
@@ -183,6 +186,12 @@ impl From<ser::Error> for Error {
 impl From<api::Error> for Error {
     fn from(err: api::Error) -> Error {
         Error::SsbApi(err)
+    }
+}
+
+impl From<num::TryFromIntError> for Error {
+    fn from(err: num::TryFromIntError) -> Error {
+        Error::TryFromInt(err)
     }
 }
 

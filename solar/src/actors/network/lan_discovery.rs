@@ -3,12 +3,12 @@
 use std::time::Duration;
 
 use async_std::{net::UdpSocket, task};
-use futures::{select_biased, FutureExt};
+use futures::{select_biased, FutureExt, SinkExt};
 use kuska_ssb::{discovery::LanBroadcast, keystore::OwnedIdentity};
 use log::warn;
 
 use crate::{
-    actors::network::{connection, connection::TcpConnection},
+    actors::network::{connection::TcpConnection, connection_manager::ConnectionEvent},
     broker::*,
     Result,
 };
@@ -24,7 +24,7 @@ pub async fn actor(
     let broadcaster = LanBroadcast::new(&server_id.pk, rpc_port).await?;
 
     // Register the "lan_discovery" actor endpoint with the broker.
-    let broker = BROKER.lock().await.register("lan_discovery", false).await?;
+    let broker = BROKER.lock().await.register("lan-discovery", false).await?;
     // Fuse internal termination channel with external channel.
     // This allows termination of the peer loop to be initiated from outside
     // this function.
@@ -91,12 +91,20 @@ async fn process_broadcast(
     if let Some((server, port, public_key)) = LanBroadcast::parse(&msg) {
         let addr = format!("{server}:{port}");
 
-        // Spawn a connection actor with the given connection parameters.
-        Broker::spawn(connection::actor(
-            server_id.clone(),
-            TcpConnection::Dial { addr, public_key },
-            selective_replication,
-        ));
+        // Create a sender channel to the broker.
+        let mut ch_broker = BROKER.lock().await.create_sender();
+
+        // Send 'lan discovery' connection event message via the broker.
+        ch_broker
+            .send(BrokerEvent::new(
+                Destination::Broadcast,
+                BrokerMessage::Connection(ConnectionEvent::LanDiscovery(
+                    TcpConnection::Dial { addr, public_key },
+                    server_id.to_owned(),
+                    selective_replication,
+                )),
+            ))
+            .await?;
     } else {
         warn!("failed to parse broadcast {}", msg);
     }

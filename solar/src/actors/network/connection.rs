@@ -22,6 +22,7 @@ use crate::{
 };
 
 /// Encapsulate inbound and outbound TCP connections.
+#[derive(Debug, Clone)]
 pub enum TcpConnection {
     /// An outbound TCP connection.
     Dial {
@@ -32,6 +33,31 @@ pub enum TcpConnection {
     },
     /// An inbound TCP connection.
     Listen { stream: TcpStream },
+}
+
+impl Display for TcpConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            TcpConnection::Dial { addr, public_key } => {
+                let public_key_as_id = public_key.to_ssb_id();
+                let peer_public_key = if public_key_as_id.starts_with('@') {
+                    public_key_as_id
+                } else {
+                    format!("@{}", public_key_as_id)
+                };
+
+                write!(f, "<TCP Dialer {} / {}>", peer_public_key, addr)
+            }
+            TcpConnection::Listen { stream } => {
+                let peer_addr = match stream.peer_addr() {
+                    Ok(addr) => addr.to_string(),
+                    _ => "_".to_string(),
+                };
+
+                write!(f, "<TCP Listener {}>", peer_addr)
+            }
+        }
+    }
 }
 
 /// Connection data.
@@ -88,8 +114,8 @@ impl ConnectionData {
 }
 
 pub async fn actor(
-    identity: OwnedIdentity,
     connection: TcpConnection,
+    identity: OwnedIdentity,
     selective_replication: bool,
 ) -> Result<()> {
     // Register a new connection with the connection manager.

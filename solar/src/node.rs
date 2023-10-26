@@ -12,6 +12,7 @@ use crate::{
             connection_manager::CONNECTION_MANAGER, connection_scheduler, dialer, lan_discovery,
             tcp_server,
         },
+        replication::ebt::EbtManager,
     },
     broker::*,
     config::ApplicationConfig,
@@ -61,13 +62,15 @@ impl Node {
             &config.network.ip, &config.network.port, &config.secret.public_key,
         );
 
+        let owned_identity = config.secret.to_owned_identity()?;
+
         // Construct the TCP server listening address.
         let tcp_server_addr: SocketAddr =
             format!("{}:{}", config.network.ip, config.network.port).parse()?;
 
         // Spawn the TCP server. Facilitates peer connections.
         Broker::spawn(tcp_server::actor(
-            config.secret.to_owned_identity()?,
+            owned_identity.to_owned(),
             tcp_server_addr,
             config.replication.selective,
         ));
@@ -86,7 +89,7 @@ impl Node {
         // CLI arguments. Facilitates operator queries during runtime.
         if config.jsonrpc.server {
             Broker::spawn(jsonrpc::server::actor(
-                config.secret.to_owned_identity()?,
+                owned_identity.to_owned(),
                 jsonrpc_server_addr,
             ));
         }
@@ -95,7 +98,7 @@ impl Node {
         // to allow LAN-local peer connections.
         if config.network.lan_discovery {
             Broker::spawn(lan_discovery::actor(
-                config.secret.to_owned_identity()?,
+                owned_identity.to_owned(),
                 config.network.port,
                 config.replication.selective,
             ));
@@ -123,12 +126,19 @@ impl Node {
 
         // Spawn the connection dialer actor. Dials remote peers as dial
         // requests are received from the connection scheduler.
-        Broker::spawn(dialer::actor(config.replication.selective));
+        Broker::spawn(dialer::actor(
+            owned_identity.to_owned(),
+            config.replication.selective,
+        ));
 
         // Spawn the connection scheduler actor. Sends dial requests to the
         // dialer for remote peers on an ongoing basis (at `eager` or `lazy`
         // intervals).
         Broker::spawn(connection_scheduler::actor(peers_to_dial));
+
+        // Spawn the EBT replication manager actor.
+        let ebt_replication_manager = EbtManager::default();
+        Broker::spawn(EbtManager::event_loop(ebt_replication_manager));
 
         // Spawn the connection manager message loop.
         let connection_manager_msgloop = CONNECTION_MANAGER.write().await.take_msgloop();

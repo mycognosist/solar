@@ -4,11 +4,11 @@
 //! message bus. Each request includes the public key and address of the peer
 //! to be dialed. Upon receiving a request, the dialer spawns the connection actor.
 use futures::{select_biased, FutureExt, StreamExt};
+use kuska_ssb::keystore::OwnedIdentity;
 
 use crate::{
     actors::network::{connection, connection::TcpConnection, connection_scheduler::DialRequest},
     broker::{ActorEndpoint, Broker, BrokerMessage, BROKER},
-    config::SECRET_CONFIG,
     Result,
 };
 
@@ -18,7 +18,7 @@ use crate::{
 /// for dial requests from the scheduler. Once received, use the attached
 /// public key and outbound address to dial the peer by spawning the connection
 /// actor.
-pub async fn actor(selective_replication: bool) -> Result<()> {
+pub async fn actor(owned_identity: OwnedIdentity, selective_replication: bool) -> Result<()> {
     // Register the connection dialer actor with the broker.
     let ActorEndpoint {
         ch_terminate,
@@ -46,11 +46,11 @@ pub async fn actor(selective_replication: bool) -> Result<()> {
             msg = broker_msg_ch.next().fuse() => {
                 if let Some(BrokerMessage::Dial(DialRequest((public_key, addr)))) = msg {
                     Broker::spawn(connection::actor(
-                        SECRET_CONFIG.get().unwrap().to_owned_identity()?,
                         TcpConnection::Dial {
                             addr: addr.to_string(),
                             public_key,
                         },
+                        owned_identity.clone(),
                         selective_replication,
                     ));
                 }

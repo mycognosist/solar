@@ -1088,7 +1088,7 @@ dependencies = [
 [[package]]
 name = "kuska-ssb"
 version = "0.4.3"
-source = "git+https://github.com/Kuska-ssb/ssb?branch=master#46591efefb78b675f2383f9d205aaf539a15da92"
+source = "git+https://github.com/Kuska-ssb/ssb?branch=master#71b7be6660d37ba5bb5bb9170d1b950972df68a7"
 dependencies = [
  "async-std",
  "async-stream",

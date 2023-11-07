@@ -136,11 +136,11 @@ pub async fn actor(
             connection_data.peer_addr = Some(addr.to_owned());
             connection_data.peer_public_key = Some(public_key);
 
-            // Send 'connecting' connection event message via the broker.
+            // Send 'staging' connection event message via the broker.
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    BrokerMessage::Connection(ConnectionEvent::Connecting(
+                    BrokerMessage::Connection(ConnectionEvent::Staging(
                         connection_data,
                         identity,
                         selective_replication,

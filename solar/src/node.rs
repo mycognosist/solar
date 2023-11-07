@@ -138,7 +138,10 @@ impl Node {
 
         // Spawn the EBT replication manager actor.
         let ebt_replication_manager = EbtManager::default();
-        Broker::spawn(EbtManager::event_loop(ebt_replication_manager));
+        Broker::spawn(EbtManager::event_loop(
+            ebt_replication_manager,
+            owned_identity.id,
+        ));
 
         // Spawn the connection manager message loop.
         let connection_manager_msgloop = CONNECTION_MANAGER.write().await.take_msgloop();

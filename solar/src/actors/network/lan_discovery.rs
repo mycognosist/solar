@@ -5,7 +5,7 @@ use std::time::Duration;
 use async_std::{net::UdpSocket, task};
 use futures::{select_biased, FutureExt, SinkExt};
 use kuska_ssb::{discovery::LanBroadcast, keystore::OwnedIdentity};
-use log::warn;
+use log::{trace, warn};
 
 use crate::{
     actors::network::{connection::TcpConnection, connection_manager::ConnectionEvent},
@@ -22,6 +22,7 @@ pub async fn actor(
 ) -> Result<()> {
     // Instantiate a new LAN broadcaster with the given public key and port.
     let broadcaster = LanBroadcast::new(&server_id.pk, rpc_port).await?;
+    trace!(target: "lan-discovery", "Initiated LAN broadcaster: {:?}", broadcaster);
 
     // Register the "lan_discovery" actor endpoint with the broker.
     let broker = BROKER.lock().await.register("lan-discovery", false).await?;
@@ -58,8 +59,8 @@ pub async fn actor(
                         }
                 }
             }
-            // Sleep for 5 seconds.
-            _ = task::sleep(Duration::from_secs(5)).fuse() => {}
+            // Sleep for 15 seconds.
+            _ = task::sleep(Duration::from_secs(15)).fuse() => {}
         }
 
         // Drop the socket connection.

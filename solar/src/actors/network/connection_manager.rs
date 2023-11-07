@@ -9,7 +9,7 @@
 //! Connection data, including the underlying TCP stream, is passed around with
 //! each event variant - allowing the handlers to take ownership of the data.
 
-use std::{collections::HashSet, net::Shutdown};
+use std::net::Shutdown;
 
 use async_std::{
     net::TcpStream,
@@ -53,6 +53,7 @@ type IsListener = bool;
 #[derive(Debug, Clone)]
 pub enum ConnectionEvent {
     LanDiscovery(TcpConnection, OwnedIdentity, EnableSelectiveReplication),
+    Staging(ConnectionData, OwnedIdentity, EnableSelectiveReplication),
     Connecting(ConnectionData, OwnedIdentity, EnableSelectiveReplication),
     Handshaking(
         ConnectionData,
@@ -73,16 +74,16 @@ pub enum ConnectionEvent {
 #[derive(Debug)]
 pub struct ConnectionManager {
     /// The public keys of all peers to whom we are currently connected.
-    pub connected_peers: HashSet<ed25519::PublicKey>,
+    pub connected_peers: Vec<(ed25519::PublicKey, usize)>,
+    /// The public keys of all peers to whom we are currently attempting a
+    /// connection
+    pub connecting_peers: Vec<(ed25519::PublicKey, usize)>,
     /// Idle connection timeout limit.
     pub idle_timeout_limit: u8,
     /// ID number of the most recently registered connection.
     last_connection_id: usize,
     /// Message loop handle.
     msgloop: Option<JoinHandle<()>>,
-    // TODO: keep a list of active connections.
-    // Then we can query total active connections using `.len()`.
-    //active_connections: HashSet<usize>,
 }
 
 impl ConnectionManager {
@@ -92,10 +93,11 @@ impl ConnectionManager {
         let msgloop = task::spawn(Self::msg_loop());
 
         Self {
+            connected_peers: Vec::new(),
+            connecting_peers: Vec::new(),
+            idle_timeout_limit: 30,
             last_connection_id: 0,
             msgloop: Some(msgloop),
-            idle_timeout_limit: 30,
-            connected_peers: HashSet::new(),
         }
     }
 
@@ -108,21 +110,60 @@ impl ConnectionManager {
     /// Returns `true` if the peer is in the list, otherwise a `false` value is
     /// returned.
     pub fn contains_connected_peer(&self, peer_id: &ed25519::PublicKey) -> bool {
-        self.connected_peers.contains(peer_id)
+        self.connected_peers
+            .iter()
+            .any(|(connected_peer_id, _)| connected_peer_id == peer_id)
     }
 
     /// Add a peer to the list of connected peers.
     /// Returns `true` if the peer was not already in the list, otherwise a
     /// `false` value is returned.
-    fn insert_connected_peer(&mut self, peer_id: ed25519::PublicKey) -> bool {
-        self.connected_peers.insert(peer_id)
+    fn insert_connected_peer(&mut self, peer_id: ed25519::PublicKey, connection_id: usize) {
+        self.connected_peers.push((peer_id, connection_id));
     }
 
     /// Remove a peer from the list of connected peers.
     /// Returns `true` if the peer was in the list, otherwise a `false` value
     /// is returned.
-    fn remove_connected_peer(&mut self, peer_id: ed25519::PublicKey) -> bool {
-        self.connected_peers.remove(&peer_id)
+    fn remove_connected_peer(&mut self, peer_id: ed25519::PublicKey, connection_id: usize) {
+        if let Some(index) = self
+            .connected_peers
+            .iter()
+            .position(|&entry| entry == (peer_id, connection_id))
+        {
+            // Ignore the return value.
+            let _ = self.connected_peers.remove(index);
+        }
+    }
+
+    /// Query whether the list of connecting peers contains the given peer.
+    /// Returns `true` if the peer is in the list, otherwise a `false` value is
+    /// returned.
+    pub fn contains_connecting_peer(&self, peer_id: &ed25519::PublicKey) -> bool {
+        self.connecting_peers
+            .iter()
+            .any(|(connecting_peer_id, _)| connecting_peer_id == peer_id)
+    }
+
+    /// Add a peer to the list of connecting peers.
+    /// Returns `true` if the peer was not already in the list, otherwise a
+    /// `false` value is returned.
+    fn insert_connecting_peer(&mut self, peer_id: ed25519::PublicKey, connection_id: usize) {
+        self.connecting_peers.push((peer_id, connection_id))
+    }
+
+    /// Remove a peer from the list of connecting peers.
+    /// Returns `true` if the peer was in the list, otherwise a `false` value
+    /// is returned.
+    fn remove_connecting_peer(&mut self, peer_id: ed25519::PublicKey, connection_id: usize) {
+        if let Some(index) = self
+            .connecting_peers
+            .iter()
+            .position(|&entry| entry == (peer_id, connection_id))
+        {
+            // Ignore the return value.
+            let _ = self.connecting_peers.remove(index);
+        }
     }
 
     /// Return a handle for the connection event message loop.
@@ -140,23 +181,24 @@ impl ConnectionManager {
         self.last_connection_id
     }
 
+    /// Handle a LAN discovery event.
     async fn handle_lan_discovery(
         tcp_connection: TcpConnection,
         identity: OwnedIdentity,
         selective_replication: EnableSelectiveReplication,
     ) -> Result<()> {
-        // Check if we are already connected to the selected peer.
-        //
-        // If yes, ignore the LAN discovery event which arose from a received
-        // UDP broadcast message.
+        // First ensure there is no active or in-progress connection
+        // with the given peer.
         if let TcpConnection::Dial { public_key, .. } = &tcp_connection {
-            if CONNECTION_MANAGER
+            if !CONNECTION_MANAGER
                 .read()
                 .await
                 .contains_connected_peer(public_key)
+                && !CONNECTION_MANAGER
+                    .read()
+                    .await
+                    .contains_connecting_peer(public_key)
             {
-                info!("peer {} is already connected", public_key.to_ssb_id());
-            } else {
                 // Spawn a connection actor with the given connection parameters.
                 //
                 // The connection actor is responsible for initiating the
@@ -172,35 +214,61 @@ impl ConnectionManager {
         Ok(())
     }
 
+    /// Handle a staging event.
+    async fn handle_staging(
+        connection_data: ConnectionData,
+        identity: OwnedIdentity,
+        selective_replication: EnableSelectiveReplication,
+        mut ch_broker: ChBrokerSend,
+    ) -> Result<()> {
+        if let Some(peer_public_key) = &connection_data.peer_public_key {
+            // Only proceed with a connection attempt if there is not an
+            // active connection or connection attempt in-progress.
+            if !CONNECTION_MANAGER
+                .read()
+                .await
+                .contains_connected_peer(peer_public_key)
+                && !CONNECTION_MANAGER
+                    .read()
+                    .await
+                    .contains_connecting_peer(peer_public_key)
+            {
+                // If no connection or connection attempt exists, initiate
+                // the connection process.
+
+                // Send 'connecting' connection event message via the broker.
+                ch_broker
+                    .send(BrokerEvent::new(
+                        Destination::Broadcast,
+                        BrokerMessage::Connection(ConnectionEvent::Connecting(
+                            connection_data,
+                            identity,
+                            selective_replication,
+                        )),
+                    ))
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle a connecting event.
     async fn handle_connecting(
         mut connection_data: ConnectionData,
         identity: OwnedIdentity,
         selective_replication: EnableSelectiveReplication,
         mut ch_broker: ChBrokerSend,
     ) -> Result<()> {
-        // Check if we are already connected to the selected peer.
-        // If yes, remove this connection.
         if let Some(peer_public_key) = &connection_data.peer_public_key {
-            if CONNECTION_MANAGER
-                .read()
-                .await
-                .contains_connected_peer(peer_public_key)
-            {
-                info!("peer {} is already connected", peer_public_key.to_ssb_id());
+            if let Some(peer_addr) = &connection_data.peer_addr {
+                CONNECTION_MANAGER
+                    .write()
+                    .await
+                    .insert_connecting_peer(*peer_public_key, connection_data.id);
 
-                // Since we already have an active connection to this peer,
-                // we can disconnect the redundant connection.
-
-                // Send 'disconnecting' connection event message via the broker.
-                ch_broker
-                    .send(BrokerEvent::new(
-                        Destination::Broadcast,
-                        BrokerMessage::Connection(ConnectionEvent::Disconnecting(connection_data)),
-                    ))
-                    .await?;
-            } else if let Some(addr) = &connection_data.peer_addr {
                 // Attempt connection.
-                if let Ok(stream) = TcpStream::connect(&addr).await {
+                if let Ok(stream) = TcpStream::connect(&peer_addr).await {
                     connection_data.stream = Some(stream);
 
                     // Send 'handshaking' connection event message via the broker.
@@ -215,6 +283,21 @@ impl ConnectionManager {
                             )),
                         ))
                         .await?;
+                } else {
+                    // If the connection attempt fails, send 'disconnecting'
+                    // connection event message via the broker.
+                    //
+                    // This removes the connection from the list of in-progress
+                    // attempts, ensuring that future connection attempts to
+                    // this peer are not blocked.
+                    ch_broker
+                        .send(BrokerEvent::new(
+                            Destination::Broadcast,
+                            BrokerMessage::Connection(ConnectionEvent::Disconnecting(
+                                connection_data,
+                            )),
+                        ))
+                        .await?;
                 }
             }
         }
@@ -222,6 +305,7 @@ impl ConnectionManager {
         Ok(())
     }
 
+    /// Handle a handshaking event.
     async fn handle_handshaking(
         mut connection_data: ConnectionData,
         identity: OwnedIdentity,
@@ -267,6 +351,7 @@ impl ConnectionManager {
         Ok(())
     }
 
+    /// Handle a connected event.
     async fn handle_connected(
         connection_data: ConnectionData,
         selective_replication: EnableSelectiveReplication,
@@ -280,7 +365,12 @@ impl ConnectionManager {
             CONNECTION_MANAGER
                 .write()
                 .await
-                .insert_connected_peer(public_key);
+                .remove_connecting_peer(public_key, connection_data.id);
+
+            CONNECTION_MANAGER
+                .write()
+                .await
+                .insert_connected_peer(public_key, connection_data.id);
         }
 
         // Send 'replicate' connection event message via the broker.
@@ -298,6 +388,7 @@ impl ConnectionManager {
         Ok(())
     }
 
+    /// Handle a replicate event.
     async fn handle_replicate(
         connection_data: ConnectionData,
         selective_replication: EnableSelectiveReplication,
@@ -349,6 +440,7 @@ impl ConnectionManager {
         Ok(())
     }
 
+    /// Handle a classic replication (`create_history_stream`) event.
     async fn handle_replicating_classic(connection_data: ConnectionData) -> Result<()> {
         debug!("Attempting classic replication with peer...");
 
@@ -358,6 +450,7 @@ impl ConnectionManager {
         Ok(())
     }
 
+    /// Handle an EBT replication event.
     async fn handle_replicating_ebt(
         connection_data: ConnectionData,
         listener: IsListener,
@@ -386,6 +479,7 @@ impl ConnectionManager {
         Ok(())
     }
 
+    /// Handle a disconnecting event.
     async fn handle_disconnecting(
         connection_data: ConnectionData,
         mut ch_broker: ChBrokerSend,
@@ -406,11 +500,27 @@ impl ConnectionManager {
         Ok(())
     }
 
+    /// Handle a disconnected event.
+    async fn handle_disconnected(connection_data: ConnectionData) -> Result<()> {
+        if let Some(public_key) = connection_data.peer_public_key {
+            CONNECTION_MANAGER
+                .write()
+                .await
+                .remove_connected_peer(public_key, connection_data.id);
+
+            CONNECTION_MANAGER
+                .write()
+                .await
+                .remove_connecting_peer(public_key, connection_data.id);
+        }
+
+        Ok(())
+    }
+
     /// Start the connection manager event loop.
     ///
     /// Listen for connection event messages via the broker and update
     /// connection state accordingly.
-    // TODO: Can we return a Result here?
     async fn msg_loop() {
         // Register the connection manager actor with the broker.
         let ActorEndpoint {
@@ -443,14 +553,24 @@ impl ConnectionManager {
                     if let Some(BrokerMessage::Connection(event)) = msg {
                         match event {
                             ConnectionEvent::LanDiscovery(tcp_connection, identity, selective_replication) => {
-                                trace!(target: "connection-manager", "LAN discovery: {}", tcp_connection );
-
                                 if let Err(err) = ConnectionManager::handle_lan_discovery(
                                     tcp_connection,
                                     identity,
                                     selective_replication,
                                 ).await {
                                     error!("Error while handling 'lan discovery' event: {}", err)
+                                }
+                            }
+                            ConnectionEvent::Staging(connection_data, identity, selective_replication,) => {
+                                trace!(target: "connection-manager", "Staging: {connection_data}");
+
+                                if let Err(err) = ConnectionManager::handle_staging(
+                                    connection_data,
+                                    identity,
+                                    selective_replication,
+                                    ch_broker.clone()
+                                ).await {
+                                    error!("Error while handling 'staging' event: {}", err)
                                 }
                             }
                             ConnectionEvent::Connecting(connection_data, identity, selective_replication,) => {
@@ -529,29 +649,26 @@ impl ConnectionManager {
                                     connection_data,
                                     ch_broker.clone()
                                 ).await {
-                                    error!("Error while handling disconnecting event: {}", err)
+                                    error!("Error while handling 'disconnecting' event: {}", err)
                                 }
                             }
-                            ConnectionEvent::Disconnected(data) => {
-                                trace!(target: "connection-manager", "Disconnected: {data}");
+                            ConnectionEvent::Disconnected(connection_data) => {
+                                trace!(target: "connection-manager", "Disconnected: {connection_data}");
 
-                                // Remove the peer from the list of connected peers.
-                                if let Some(public_key) = data.peer_public_key {
-                                    CONNECTION_MANAGER
-                                        .write()
-                                        .await
-                                        .remove_connected_peer(public_key);
+                                if let Err(err) = ConnectionManager::handle_disconnected(
+                                    connection_data,
+                                ).await {
+                                    error!("Error while handling 'disconnected' event: {}", err)
                                 }
                             }
-                            ConnectionEvent::Error(data, err) => {
-                                trace!(target: "connection-manager", "Error: {data}: {err}");
+                            ConnectionEvent::Error(connection_data, err) => {
+                                trace!(target: "connection-manager", "Error: {connection_data}: {err}");
+                                error!("Connection error: {connection_data}: {err}");
 
-                                // Remove the peer from the list of connected peers.
-                                if let Some(public_key) = data.peer_public_key {
-                                    CONNECTION_MANAGER
-                                        .write()
-                                        .await
-                                        .remove_connected_peer(public_key);
+                                if let Err(err) = ConnectionManager::handle_disconnected(
+                                    connection_data,
+                                ).await {
+                                    error!("Error while handling 'disconnected' event: {}", err)
                                 }
                             }
                         }

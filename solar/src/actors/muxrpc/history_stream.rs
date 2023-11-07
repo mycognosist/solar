@@ -150,7 +150,7 @@ where
 
                 // Retrieve the sequence number of the most recent message for
                 // this peer from the local key-value store.
-                if let Some(last_seq) = KV_STORE.read().await.get_latest_seq(&peer_pk)? {
+                if let Some(last_seq) = KV_STORE.read().await.get_latest_seq(peer_pk)? {
                     // Use the latest sequence number to update the request args.
                     args = args.after_seq(last_seq);
                 }

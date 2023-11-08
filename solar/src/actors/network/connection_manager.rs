@@ -742,44 +742,52 @@ mod test {
     async fn test_connected_peers() -> Result<()> {
         let connection_manager = instantiate_new_connection_manager();
 
-        // Create a unique keypair to sign messages.
-        let keypair = SecretConfig::create().to_owned_identity().unwrap();
+        // Create two unique keypairs to sign messages.
+        let keypair_1 = SecretConfig::create().to_owned_identity().unwrap();
+        let keypair_2 = SecretConfig::create().to_owned_identity().unwrap();
 
         // Insert a new connected peer.
-        let insert_result = connection_manager
+        connection_manager
             .write()
             .await
-            .insert_connected_peer(keypair.pk);
-        assert_eq!(insert_result, true);
+            .insert_connected_peer(keypair_1.pk, 1);
 
         // Query the list of connected peers.
         let query_result = connection_manager
             .read()
             .await
-            .contains_connected_peer(&keypair.pk);
+            .contains_connected_peer(&keypair_1.pk);
         assert_eq!(query_result, true);
 
-        // Attempt to insert the same peer ID for a second time.
-        let reinsert_result = connection_manager
+        // Insert the a second connected peer.
+        connection_manager
             .write()
             .await
-            .insert_connected_peer(keypair.pk);
-        assert_eq!(reinsert_result, false);
+            .insert_connected_peer(keypair_2.pk, 2);
+
+        // Count the active connections.
+        let connections = connection_manager.read().await._count_connections();
+        assert_eq!(connections, 2);
+
+        // Remove the first peer from the list of connected peers.
+        connection_manager
+            .write()
+            .await
+            .remove_connected_peer(keypair_1.pk, 1);
 
         // Count the active connections.
         let connections = connection_manager.read().await._count_connections();
         assert_eq!(connections, 1);
 
-        // Remove a peer from the list of connected peers.
-        let remove_result = connection_manager
+        // Remove the second peer from the list of connected peers.
+        connection_manager
             .write()
             .await
-            .remove_connected_peer(keypair.pk);
-        assert_eq!(remove_result, true);
+            .remove_connected_peer(keypair_2.pk, 2);
 
         // Count the active connections.
-        let conns = connection_manager.read().await._count_connections();
-        assert_eq!(conns, 0);
+        let connections = connection_manager.read().await._count_connections();
+        assert_eq!(connections, 0);
 
         Ok(())
     }

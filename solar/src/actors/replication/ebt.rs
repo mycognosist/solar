@@ -7,48 +7,36 @@
 //!
 //! Each note is a JSON object containing one or more name/value pairs.
 
-// EBT in ScuttleGo:
-//
-// https://github.com/planetary-social/scuttlego/commit/e1412a550652c791dd97c72797ed512f385669e8
-// http://dev.planetary.social/replication/ebt.html
-
-// serde_json::to_string(&notes)?;
-// "{\"@FCX/tsDLpubCPKKfIrw4gc+SQkHcaD17s7GI6i/ziWY=.ed25519\":123,\"@l1sGqWeCZRA99gN+t9sI6+UOzGcHq3KhLQUYEwb4DCo=.ed25519\":-1}"
-
 use std::{
     collections::{HashMap, HashSet},
     convert::TryInto,
-    time::Duration,
+    fmt::Display,
+    thread,
+    time::{Duration, Instant},
 };
 
 use async_std::task;
-use futures::{pin_mut, select_biased, FutureExt, StreamExt};
+use futures::{pin_mut, select_biased, FutureExt, SinkExt, StreamExt};
 use kuska_ssb::{
     api::{dto::EbtReplicate, ApiCaller},
     crypto::ToSsbId,
+    feed::Message,
     handshake::async_std::BoxStream,
     rpc::{RpcReader, RpcWriter},
 };
-use log::{debug, error, trace};
+use log::{debug, error, trace, warn};
+use serde_json::Value;
 
 use crate::{
     actors::{
-        muxrpc::{EbtReplicateHandler, RpcHandler, RpcInput},
+        muxrpc::{EbtReplicateHandler, ReqNo, RpcInput},
         network::connection::ConnectionData,
     },
-    broker::{ActorEndpoint, BrokerMessage, BROKER},
+    broker::{ActorEndpoint, BrokerEvent, BrokerMessage, Destination, BROKER},
+    config::PEERS_TO_REPLICATE,
     node::KV_STORE,
     Error, Result,
 };
-
-// TODO: Do we need this? Is there another way?
-// Especially since we won't need to access this from outside the module.
-// Have a look at the connection manager too.
-/// The EBT replication manager for the solar node.
-/*
-pub static EBT_MANAGER: Lazy<Arc<RwLock<EbtManager>>> =
-    Lazy::new(|| Arc::new(RwLock::new(EbtManager::new())));
-*/
 
 /// An SSB identity in the form `@...=.ed25519`.
 // The validity of this string should be confirmed when a note is received.
@@ -61,45 +49,53 @@ type SsbId = String;
 type EncodedClockValue = i64;
 
 /// A vector clock which maps an SSB ID to an encoded vector clock value.
-type VectorClock = HashMap<SsbId, EncodedClockValue>;
-
-/*
-// TODO: Might be better like this.
-struct VectorClock {
-    id: SsbId,
-    replicate_flag: bool,
-    receive_flag: Option<bool>,
-    sequence: Option<u64>,
-}
-*/
+pub type VectorClock = HashMap<SsbId, EncodedClockValue>;
 
 /// EBT replication events.
 #[derive(Debug, Clone)]
 pub enum EbtEvent {
     WaitForSessionRequest(ConnectionData),
     RequestSession(ConnectionData),
+    SessionInitiated(ReqNo, SsbId, EbtSessionRole),
+    SendClock(ReqNo, VectorClock),
+    ReceivedClock(ReqNo, SsbId, VectorClock),
+    ReceivedMessage(Message),
+    SendMessage(ReqNo, SsbId, Value),
 }
 /*
-    SessionInitiated,
-    ReceivedClock,
-    ReceivedMessage,
-    SendClock,
-    SendMessage,
+    SessionConcluded,
     Error,
 }
 */
 
-// TODO: Track active replication sessions.
+/// Role of a peer in an EBT session.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EbtSessionRole {
+    Requester,
+    Responder,
+}
 
+impl Display for EbtSessionRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            EbtSessionRole::Requester => write!(f, "requester"),
+            EbtSessionRole::Responder => write!(f, "responder"),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct EbtManager {
-    /// The SSB ID of the local node.
-    id: SsbId,
+    /// Active EBT peer sessions.
+    active_sessions: HashSet<SsbId>,
     /// Duration to wait before switching feed request to a different peer.
     feed_wait_timeout: u8,
-    /// Duration to wait for a connected peer to initiate an EBT session.
-    session_wait_timeout: u8,
+    /// The state of the replication loop.
+    is_replication_loop_active: bool,
     /// The local vector clock.
     local_clock: VectorClock,
+    /// The SSB ID of the local node.
+    local_id: SsbId,
     /// The vector clock for each known peer.
     peer_clocks: HashMap<SsbId, VectorClock>,
     /// A set of all the feeds for which active requests are open.
@@ -107,20 +103,21 @@ pub struct EbtManager {
     /// This allows us to avoid requesting a feed from multiple peers
     /// simultaneously.
     requested_feeds: HashSet<SsbId>,
-    /// The state of the replication loop.
-    is_replication_loop_active: bool,
+    /// Duration to wait for a connected peer to initiate an EBT session.
+    session_wait_timeout: u8,
 }
 
 impl Default for EbtManager {
     fn default() -> Self {
         EbtManager {
-            id: String::new(),
+            active_sessions: HashSet::new(),
             feed_wait_timeout: 3,
-            session_wait_timeout: 5,
+            is_replication_loop_active: false,
             local_clock: HashMap::new(),
+            local_id: String::new(),
             peer_clocks: HashMap::new(),
             requested_feeds: HashSet::new(),
-            is_replication_loop_active: false,
+            session_wait_timeout: 5,
         }
     }
 }
@@ -131,40 +128,50 @@ impl EbtManager {
     // Write peer clock state to file.
     // fn persist_peer_clocks()
 
-    /*
-    async fn actor() -> Result<()> {
-        let mut ch_msg = ch_msg.ok_or(Error::OptionIsNone)?;
+    /// Initialise the local clock based on peers to be replicated.
+    ///
+    /// This defines the public keys of all feeds we wish to replicate,
+    /// along with the latest sequence number for each.
+    //async fn init_local_clock(mut self, local_id: &SsbId) -> Result<()> {
+    async fn init_local_clock(&mut self) -> Result<()> {
+        debug!("Initialising local EBT clock");
 
-        let mut ebt = Ebt::default();
-        Ebt::event_loop(ebt, ch_terminate, ch_msg).await;
+        let local_id = self.local_id.to_owned();
+
+        // Set the local feed to be replicated.
+        self.replicate(&local_id).await?;
+
+        // Get list of peers to replicate.
+        if let Some(peers) = PEERS_TO_REPLICATE.get() {
+            // Request replication of each peer.
+            for peer in peers.keys() {
+                self.replicate(peer).await?;
+            }
+        }
+
+        // TODO: Load peer clocks from file and update `peer_clocks`.
 
         Ok(())
     }
-
-    /// Instantiate a new `EbtManager`.
-    pub fn new() -> Self {
-        let mut ebt_manager = EbtManager::default();
-
-        // Spawn the EBT event message loop.
-        let event_loop = task::spawn(Self::event_loop());
-
-        ebt_manager.event_loop = Some(event_loop);
-
-        ebt_manager
-    }
-    */
 
     /// Start the EBT event loop.
     ///
     /// Listen for EBT event messages via the broker and update EBT session
     /// state accordingly.
-    pub async fn event_loop(self) -> Result<()> {
+    pub async fn event_loop(mut self, local_id: SsbId) -> Result<()> {
         debug!("Started EBT event loop");
+
+        // Set the ID (@-prefixed public key) of the local node.
+        self.local_id = local_id;
+
+        // Initialise the local clock based on peers to be replicated.
+        self.init_local_clock().await?;
 
         // Register the EBT event loop actor with the broker.
         let ActorEndpoint {
             ch_terminate,
             ch_msg,
+            mut ch_broker,
             ..
         } = BROKER.lock().await.register("ebt-event-loop", true).await?;
 
@@ -183,40 +190,117 @@ impl EbtManager {
                         match event {
                             EbtEvent::WaitForSessionRequest(connection_data) => {
                                 trace!(target: "ebt", "Waiting for EBT session request");
-                                if let Err(err) = task::spawn(EbtManager::replication_loop(connection_data, false, 5)).await {
-                                    error!("Failed to spawn EBT replication loop: {}", err)
-                                }
-
+                                let session_role = EbtSessionRole::Responder;
+                                task::spawn(EbtManager::replication_loop(connection_data, session_role, 5));
                             }
                             EbtEvent::RequestSession(connection_data) => {
-                                trace!(target: "ebt", "Requesting an EBT session with {:?}", connection_data.peer_public_key.unwrap());
-                                // TODO: First check for an active session for this peer.
-                                if let Err(err) = task::spawn(EbtManager::replication_loop(connection_data, false, 5)).await {
-                                    error!("Failed to spawn EBT replication loop: {}", err)
+                                if let Some(peer_public_key) = &connection_data.peer_public_key {
+                                    let peer_ssb_id = peer_public_key.to_ssb_id();
+                                    // Only proceed with session initiation if there
+                                    // is no currently active session with the given peer.
+                                    if !self.active_sessions.contains(&peer_ssb_id) {
+                                        trace!(target: "ebt", "Requesting an EBT session with {:?}", connection_data.peer_public_key.unwrap());
+                                        let session_role = EbtSessionRole::Requester;
+                                        task::spawn(EbtManager::replication_loop(connection_data, session_role, 5));
+                                    }
                                 }
                             }
-                            /*
-                            EbtEvent::SessionInitiated => {
-                                trace!(target: "ebt-replication", "Initiated an EBT session with {}", data.peer_public_key);
-                                // TODO: Update active sessions.
+                            EbtEvent::SessionInitiated(req_no, peer_ssb_id, session_role) => {
+                                trace!(target: "ebt-replication", "Initiated EBT session with {} as {}", peer_ssb_id, session_role);
+                                self.register_session(&peer_ssb_id);
+
+                                let local_clock = self.local_clock.to_owned();
+
+                                match session_role {
+                                    EbtSessionRole::Responder => {
+                                        ch_broker
+                                            .send(BrokerEvent::new(
+                                                Destination::Broadcast,
+                                                BrokerMessage::Ebt(EbtEvent::SendClock(req_no, local_clock)),
+                                            ))
+                                            .await?;
+                                    }
+                                    EbtSessionRole::Requester => {
+                                        // TODO: ReceiveClock ?
+                                        trace!(target: "ebt-replication", "EBT session requester: {}", req_no);
+                                    }
+                                }
                             }
-                            EbtEvent::ReceivedClock => {
-                                trace!(target: "ebt-replication", "Received vector clock from {}", data.peer_public_key);
-                                // TODO: Update peer clocks.
-                            }
-                            EbtEvent::ReceivedMessage => {
-                                trace!(target: "ebt-replication", "Received message from {}", data.peer_public_key);
-                                // TODO: Append message to feed.
-                            }
-                            EbtEvent::SendClock => {
-                                trace!(target: "ebt-replication", "Sending vector clock to {}", data.peer_public_key);
+                            EbtEvent::SendClock(_, clock) => {
+                                trace!(target: "ebt-replication", "Sending vector clock: {:?}", clock);
                                 // TODO: Update sent clocks.
                             }
-                            EbtEvent::SendMessage => {
-                                trace!(target: "ebt-replication", "Sending message to {}", data.peer_public_key);
+                            EbtEvent::ReceivedClock(req_no, peer_ssb_id, clock) => {
+                                trace!(target: "ebt-replication", "Received vector clock: {:?}", clock);
+
+                                // If a clock is received without a prior EBT replicate
+                                // request having been received from the associated peer, it is
+                                // assumed that the clock was sent in response to a locally-sent
+                                // EBT replicate request. Ie. The session was requested by the
+                                // local peer.
+                                if !self.active_sessions.contains(&peer_ssb_id) {
+                                   ch_broker
+                                        .send(BrokerEvent::new(
+                                            Destination::Broadcast,
+                                            BrokerMessage::Ebt(
+                                                EbtEvent::SessionInitiated(
+                                                    req_no, peer_ssb_id.to_owned(), EbtSessionRole::Requester
+                                                )
+                                            ),
+                                        ))
+                                        .await?;
+                                }
+
+                                self.set_clock(&peer_ssb_id, clock.to_owned());
+
+                                let msgs = EbtManager::retrieve_requested_messages(&req_no, &peer_ssb_id, clock).await?;
+                                for msg in msgs {
+                                    ch_broker
+                                        .send(BrokerEvent::new(
+                                            Destination::Broadcast,
+                                            BrokerMessage::Ebt(EbtEvent::SendMessage(
+                                                req_no,
+                                                peer_ssb_id.to_owned(),
+                                                msg,
+                                            )),
+                                        ))
+                                        .await?;
+                                }
+                            }
+                            EbtEvent::ReceivedMessage(msg) => {
+                                trace!(target: "ebt-replication", "Received message: {:?}", msg);
+
+                                // Retrieve the sequence number of the most recent message for
+                                // the peer that authored the received message.
+                                let last_seq = KV_STORE
+                                    .read()
+                                    .await
+                                    .get_latest_seq(&msg.author().to_string())?
+                                    .unwrap_or(0);
+
+                                // Validate the sequence number.
+                                if msg.sequence() == last_seq + 1 {
+                                    // Append the message to the feed.
+                                    KV_STORE.write().await.append_feed(msg.clone()).await?;
+
+                                    debug!(
+                                        "Received message number {} from {}",
+                                        msg.sequence(),
+                                        msg.author()
+                                    );
+                                } else {
+                                    warn!(
+                                        "Received out-of-order message from {}; received: {}, expected: {} + 1",
+                                        &msg.author().to_string(),
+                                        msg.sequence(),
+                                        last_seq
+                                    );
+                                }
+                            }
+                            EbtEvent::SendMessage(req_no, peer_ssb_id, msg) => {
+                                trace!(target: "ebt-replication", "Sending message...");
                                 // TODO: Update sent messages.
                             }
-                            */
                         }
                     }
                 }
@@ -226,9 +310,10 @@ impl EbtManager {
         Ok(())
     }
 
+    // TODO: Consider moving this into a separate module.
     async fn replication_loop(
         connection_data: ConnectionData,
-        is_session_requester: bool,
+        session_role: EbtSessionRole,
         session_wait_timeout: u8,
     ) -> Result<()> {
         // Register the EBT replication loop actor with the broker.
@@ -236,6 +321,7 @@ impl EbtManager {
             ch_terminate,
             ch_msg,
             actor_id,
+            ch_broker,
             ..
         } = BROKER
             .lock()
@@ -288,10 +374,20 @@ impl EbtManager {
 
         trace!(target: "ebt-session", "Initiating EBT replication session with: {}", peer_ssb_id);
 
-        if is_session_requester {
+        let mut session_initiated = false;
+        let mut ebt_begin_waiting = None;
+
+        if let EbtSessionRole::Requester = session_role {
             // Send EBT request.
             let ebt_args = EbtReplicate::default();
             api.ebt_replicate_req_send(&ebt_args).await?;
+        } else {
+            // Record the time at which we begin waiting to receive an EBT
+            // replicate request.
+            //
+            // This is later used to break out of the loop if no request
+            // is received within the given time allowance.
+            ebt_begin_waiting = Some(Instant::now());
         }
 
         loop {
@@ -305,37 +401,31 @@ impl EbtManager {
                 packet = rpc_recv_stream.select_next_some() => {
                     // Reset the timer counter.
                     timer_counter = 0;
-                    let (rpc_id, packet) = packet;
-                    RpcInput::Network(rpc_id, packet)
+                    let (req_no, packet) = packet;
+                    RpcInput::Network(req_no, packet)
                 },
                 msg = ch_msg.next().fuse() => {
-                    // Reset the timer counter.
-                    timer_counter = 0;
+                    // Listen for a 'session initiated' event.
+                    if let Some(BrokerMessage::Ebt(EbtEvent::SessionInitiated(_, ref ssb_id, ref session_role))) = msg {
+                        if peer_ssb_id == *ssb_id && *session_role == EbtSessionRole::Responder {
+                            session_initiated = true;
+                        }
+                    }
                     if let Some(msg) = msg {
                         RpcInput::Message(msg)
                     } else {
                         RpcInput::None
                     }
                 },
-                _ = task::sleep(Duration::from_secs(1)).fuse() => {
-                    // Break out of the replication loop if the connection idle
-                    // timeout limit has been reached.
-                    if timer_counter >= session_wait_timeout {
-                        break
-                    } else {
-                        // Increment the timer counter.
-                        timer_counter += 1;
-                        RpcInput::Timer
-                    }
-                }
             };
 
             let mut handled = false;
             match ebt_replicate_handler
-                .handle(&mut api, &input, &mut ch_broker)
+                .handle(&mut api, &input, &mut ch_broker, peer_ssb_id.to_owned())
                 .await
             {
                 Ok(has_been_handled) => {
+                    //trace!(target: "ebt-session", "EBT handler returned: {}", has_been_handled);
                     if has_been_handled {
                         handled = true;
                         break;
@@ -345,44 +435,36 @@ impl EbtManager {
                     error!("ebt replicate handler failed with {:?}", err);
                 }
             }
-            if !handled {
-                trace!(target: "ebt-session", "Message not processed: {:?}", input);
+
+            // If no active session has been initiated within 3 seconds of
+            // waiting to receive a replicate request, exit the replication
+            // loop and send an outbound request.
+            if let Some(time) = ebt_begin_waiting {
+                if !session_initiated && time.elapsed() >= Duration::new(3, 0) {
+                    ch_broker
+                        .send(BrokerEvent::new(
+                            Destination::Broadcast,
+                            BrokerMessage::Ebt(EbtEvent::RequestSession(connection_data)),
+                        ))
+                        .await?;
+
+                    // Break out of the input processing loop to conclude
+                    // the replication session.
+                    break;
+                }
             }
         }
+
+        // TODO: Emit SessionConcluded event with peer_ssb_id.
 
         trace!(target: "ebt-session", "EBT replication session concluded with: {}", peer_ssb_id);
 
         Ok(())
     }
 
-    /*
-    pub fn take_event_loop(&mut self) -> JoinHandle<()> {
-        self.event_loop.take().unwrap()
-    }
-    */
-
-    /*
-    async fn init() -> Result<Self> {
-        let mut ebt = Ebt::default();
-        let event_loop = task::spawn(Ebt::event_loop());
-        ebt.event_loop = Some(event_loop);
-
-        // Get list of peers to replicate.
-        if let Some(peers) = PEERS_TO_REPLICATE.get() {
-            // Request replication of each peer.
-            for peer in peers.keys() {
-                ebt.replicate(peer).await?;
-            }
-        }
-        // TODO: Load peer clocks from file and update `peer_clocks`.
-
-        Ok(ebt)
-    }
-    */
-
     /// Retrieve the vector clock for the given SSB ID.
     fn get_clock(self, peer_id: &SsbId) -> Option<VectorClock> {
-        if peer_id == &self.id {
+        if peer_id == &self.local_id {
             Some(self.local_clock)
         } else {
             self.peer_clocks.get(peer_id).cloned()
@@ -391,7 +473,7 @@ impl EbtManager {
 
     /// Set or update the vector clock for the given SSB ID.
     fn set_clock(&mut self, peer_id: &SsbId, clock: VectorClock) {
-        if peer_id == &self.id {
+        if peer_id == &self.local_id {
             self.local_clock = clock
         } else {
             self.peer_clocks.insert(peer_id.to_owned(), clock);
@@ -406,10 +488,24 @@ impl EbtManager {
             let encoded_value: EncodedClockValue = EbtManager::encode(true, Some(true), Some(seq))?;
             // Insert the ID and encoded sequence into the local clock.
             self.local_clock.insert(peer_id.to_owned(), encoded_value);
+        } else {
+            // No messages are stored in the local database for this feed.
+            // Set replicate flag to `true`, receive to `false` and `seq` to 0.
+            let encoded_value: EncodedClockValue = EbtManager::encode(true, Some(false), Some(0))?;
+            self.local_clock.insert(peer_id.to_owned(), encoded_value);
         }
 
         Ok(())
     }
+
+    /// Register a new EBT session for the given peer.
+    fn register_session(&mut self, peer_ssb_id: &SsbId) {
+        self.active_sessions.insert(peer_ssb_id.to_owned());
+
+        trace!(target: "ebt-session", "Registered new EBT session for {}", peer_ssb_id);
+    }
+
+    fn has_active_session(self, peer_ssb_id: &SsbId) {}
 
     /// Revoke a replication request for the feed represented by the given SSB
     /// ID.
@@ -422,6 +518,35 @@ impl EbtManager {
         self.requested_feeds.insert(peer_id.to_owned());
     }
 
+    /// Decode a peer's vector clock and retrieve all requested messages.
+    async fn retrieve_requested_messages(
+        req_no: &ReqNo,
+        peer_ssb_id: &SsbId,
+        clock: VectorClock,
+    ) -> Result<Vec<Value>> {
+        let mut messages_to_be_sent = Vec::new();
+
+        // Iterate over all key-value pairs in the vector clock.
+        for (feed_id, encoded_seq_no) in clock.iter() {
+            if *encoded_seq_no != -1 {
+                // Decode the encoded vector clock sequence number.
+                // TODO: Match properly on the values of replicate_flag and receive_flag.
+                let (replicate_flag, receive_flag, sequence) = EbtManager::decode(*encoded_seq_no)?;
+                if let Some(last_seq) = KV_STORE.read().await.get_latest_seq(&feed_id)? {
+                    if let Some(seq) = sequence {
+                        for n in seq..(last_seq + 1) {
+                            if let Some(msg_kvt) = KV_STORE.read().await.get_msg_kvt(&feed_id, n)? {
+                                messages_to_be_sent.push(msg_kvt.value)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(messages_to_be_sent)
+    }
+
     /// Decode a value from a control message (aka. note), returning the values
     /// of the replicate flag, receive flag and sequence.
     ///
@@ -429,8 +554,9 @@ impl EbtManager {
     /// messages for the referenced feed.
     ///
     /// If the replicate flag is `true`, values will be returned for the receive
-    /// flag and sequence. The sequence refers to a sequence number of the
-    /// referenced feed.
+    /// flag and sequence.
+    ///
+    /// The sequence refers to a sequence number of the referenced feed.
     fn decode(value: i64) -> Result<(bool, Option<bool>, Option<u64>)> {
         let (replicate_flag, receive_flag, sequence) = if value < 0 {
             // Replicate flag is `false`.
@@ -489,231 +615,6 @@ impl EbtManager {
         Ok(value)
     }
 }
-
-/*
-pub async fn actor<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync>(
-    connection_data: ConnectionData,
-    stream_reader: R,
-    stream_writer: W,
-    handshake: HandshakeComplete,
-    peer_pk: ed25519::PublicKey,
-) -> Result<()> {
-    let mut ch_broker = BROKER.lock().await.create_sender();
-
-    // Attempt replication.
-    let replication_result = actor_inner(
-        connection_data.to_owned(),
-        stream_reader,
-        stream_writer,
-        handshake,
-    )
-    .await;
-
-    match replication_result {
-        Ok(connection_data) => {
-            info!("👋 finished EBT replication with {}", peer_pk.to_ssb_id());
-
-            // Send 'disconnecting' connection event message via the broker.
-            ch_broker
-                .send(BrokerEvent::new(
-                    Destination::Broadcast,
-                    ConnectionEvent::Disconnecting(connection_data.to_owned()),
-                ))
-                .await?;
-        }
-        Err(err) => {
-            warn!(
-                "💀 EBT replication with {} terminated with error {:?}",
-                peer_pk.to_ssb_id(),
-                err
-            );
-
-            // Send 'error' connection event message via the broker.
-            ch_broker
-                .send(BrokerEvent::new(
-                    Destination::Broadcast,
-                    ConnectionEvent::Error(connection_data, err.to_string()),
-                ))
-                .await?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Spawn the EBT replication loop and report on the connection outcome.
-pub async fn actor_inner<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync>(
-    connection_data: ConnectionData,
-    mut stream_reader: R,
-    mut stream_writer: W,
-    handshake: HandshakeComplete,
-) -> Result<ConnectionData> {
-    // Register the "ebt-replication" actor endpoint with the broker.
-    let ActorEndpoint {
-        ch_terminate,
-        mut ch_broker,
-        ch_msg,
-        actor_id,
-        ..
-    } = BROKER
-        .lock()
-        .await
-        .register("ebt-replication", true)
-        .await?;
-
-    // Set the connection idle timeout limit according to the connection
-    // manager configuration. This value is used to break out of the
-    // replication loop after n consecutive idle seconds.
-    let connection_idle_timeout_limit = CONNECTION_MANAGER.read().await.idle_timeout_limit;
-
-    // Send 'replicating' connection event message via the broker.
-    ch_broker
-        .send(BrokerEvent::new(
-            Destination::Broadcast,
-            ConnectionEvent::Replicating(connection_data.to_owned()),
-        ))
-        .await?;
-
-    // Spawn the replication loop (responsible for negotiating RPC requests).
-    replication_loop(
-        actor_id,
-        &mut stream_reader,
-        &mut stream_writer,
-        handshake,
-        ch_terminate,
-        ch_msg.unwrap(),
-        connection_idle_timeout_limit,
-    )
-    .await?;
-
-    let _ = ch_broker.send(BrokerEvent::Disconnect { actor_id }).await;
-
-    Ok(connection_data)
-}
-
-async fn replication_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync>(
-    actor_id: usize,
-    stream_reader: R,
-    stream_writer: W,
-    handshake: HandshakeComplete,
-    ch_terminate: ChSigRecv,
-    mut ch_msg: ChMsgRecv,
-    connection_idle_timeout_limit: u8,
-) -> Result<()> {
-    // Parse the peer public key from the handshake.
-    let peer_ssb_id = handshake.peer_pk.to_ssb_id();
-
-    // Instantiate a box stream and split it into reader and writer streams.
-    let (box_stream_read, box_stream_write) =
-        BoxStream::from_handshake(stream_reader, stream_writer, handshake, 0x8000)
-            .split_read_write();
-
-    // Instantiate RPC reader and writer using the box streams.
-    let rpc_reader = RpcReader::new(box_stream_read);
-    let rpc_writer = RpcWriter::new(box_stream_write);
-    let mut api = ApiCaller::new(rpc_writer);
-
-    // TODO: Do we need to instantiate all of these handlers when replicating
-    // with EBT? Or only for classic replication?
-
-    // Instantiate the MUXRPC handlers.
-    //let mut history_stream_handler = HistoryStreamHandler::new(actor_id);
-    let mut ebt_replicate_handler = EbtReplicateHandler::new(actor_id);
-    let mut whoami_handler = WhoAmIHandler::new(&peer_ssb_id);
-    let mut get_handler = GetHandler::default();
-    let mut blobs_get_handler = BlobsGetHandler::default();
-    let mut blobs_wants_handler = BlobsWantsHandler::default();
-
-    let mut handlers: Vec<&mut dyn RpcHandler<W>> = vec![
-        //&mut history_stream_handler,
-        &mut ebt_replicate_handler,
-        &mut whoami_handler,
-        &mut get_handler,
-        &mut blobs_get_handler,
-        &mut blobs_wants_handler,
-    ];
-
-    // Create channel to send messages to broker.
-    let mut ch_broker = BROKER.lock().await.create_sender();
-    // Fuse internal termination channel with external channel.
-    // This allows termination of the replication loop to be initiated from
-    // outside this function.
-    let mut ch_terminate_fuse = ch_terminate.fuse();
-
-    // Convert the box stream reader into a stream.
-    let rpc_recv_stream = rpc_reader.into_stream().fuse();
-    pin_mut!(rpc_recv_stream);
-
-    // Instantiate a timer counter.
-    //
-    // This counter is used to break out of the input loop after n consecutive
-    // timer events. Since the sleep duration is currently set to 1 second,
-    // this means that the input loop will be exited after n seconds of idle
-    // activity (ie. no incoming packets or messages).
-    let mut timer_counter = 0;
-
-    trace!(target: "ebt-replication-loop", "initiating ebt replication loop with: {}", peer_ssb_id);
-
-    loop {
-        // Poll multiple futures and streams simultaneously, executing the
-        // branch for the future that finishes first. If multiple futures are
-        // ready, one will be selected in order of declaration.
-        let input = select_biased! {
-            _value = ch_terminate_fuse =>  {
-                break;
-            },
-            packet = rpc_recv_stream.select_next_some() => {
-                // Reset the timer counter.
-                timer_counter = 0;
-                let (rpc_id, packet) = packet;
-                RpcInput::Network(rpc_id, packet)
-            },
-            msg = ch_msg.next().fuse() => {
-                // Reset the timer counter.
-                timer_counter = 0;
-                if let Some(msg) = msg {
-                    RpcInput::Message(msg)
-                } else {
-                    RpcInput::None
-                }
-            },
-            _ = task::sleep(Duration::from_secs(1)).fuse() => {
-                // Break out of the replication loop if the connection idle
-                // timeout limit has been reached.
-                if timer_counter >= connection_idle_timeout_limit {
-                    break
-                } else {
-                    // Increment the timer counter.
-                    timer_counter += 1;
-                    RpcInput::Timer
-                }
-            }
-        };
-
-        let mut handled = false;
-        for handler in handlers.iter_mut() {
-            match handler.handle(&mut api, &input, &mut ch_broker).await {
-                Ok(has_been_handled) => {
-                    if has_been_handled {
-                        handled = true;
-                        break;
-                    }
-                }
-                Err(err) => {
-                    error!("handler {} failed with {:?}", handler.name(), err);
-                }
-            }
-        }
-        if !handled {
-            trace!(target: "ebt-replication-loop", "message not processed: {:?}", input);
-        }
-    }
-
-    trace!(target: "ebt-replication-loop", "ebt peer loop concluded with: {}", peer_ssb_id);
-
-    Ok(())
-}
-*/
 
 #[cfg(test)]
 mod test {

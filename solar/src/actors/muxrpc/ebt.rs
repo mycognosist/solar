@@ -3,22 +3,26 @@
 use std::{collections::HashMap, marker::PhantomData};
 
 use async_std::io::Write;
-use async_trait::async_trait;
+use futures::SinkExt;
 use kuska_ssb::{
     api::{dto, ApiCaller, ApiMethod},
+    feed::{Feed as MessageKvt, Message},
     rpc,
 };
 use log::{trace, warn};
 
 use crate::{
-    actors::muxrpc::handler::{RpcHandler, RpcInput},
-    broker::ChBrokerSend,
+    actors::{
+        muxrpc::{ReqNo, RpcInput},
+        replication::ebt::{EbtEvent, SessionRole},
+    },
+    broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination, BROKER},
     Result,
 };
 
 #[derive(Debug)]
 struct EbtReplicateRequest {
-    req_no: i32,
+    req_no: ReqNo,
     args: dto::EbtReplicate,
     from: u64,
 }
@@ -30,13 +34,13 @@ where
 {
     initialized: bool,
     _actor_id: usize,
+    // TODO: Consider renaming the `reqs` and `peers` fields.
     reqs: HashMap<String, EbtReplicateRequest>,
-    peers: HashMap<i32, String>,
+    peers: HashMap<ReqNo, String>,
     phantom: PhantomData<W>,
 }
 
-#[async_trait]
-impl<W> RpcHandler<W> for EbtReplicateHandler<W>
+impl<W> EbtReplicateHandler<W>
 where
     W: Write + Unpin + Send + Sync,
 {
@@ -45,11 +49,12 @@ where
     }
 
     /// Handle an RPC event.
-    async fn handle(
+    pub async fn handle(
         &mut self,
         api: &mut ApiCaller<W>,
         op: &RpcInput,
         ch_broker: &mut ChBrokerSend,
+        peer_ssb_id: String,
     ) -> Result<bool> {
         trace!(target: "ebt-handler", "Received MUXRPC input: {:?}", op);
 
@@ -58,10 +63,29 @@ where
             RpcInput::Network(req_no, rpc::RecvMsg::RpcRequest(req)) => {
                 match ApiMethod::from_rpc_body(req) {
                     Some(ApiMethod::EbtReplicate) => {
-                        self.recv_ebtreplicate(api, *req_no, req).await
+                        self.recv_ebtreplicate(api, *req_no, req, peer_ssb_id).await
                     }
                     _ => Ok(false),
                 }
+            }
+            RpcInput::Network(req_no, rpc::RecvMsg::OtherRequest(_type, req)) => {
+                // Attempt to deserialize bytes into vector clock hashmap.
+                // If the deserialization is successful, emit a 'received clock'
+                // event.
+                if let Ok(clock) = serde_json::from_slice(req) {
+                    ch_broker
+                        .send(BrokerEvent::new(
+                            Destination::Broadcast,
+                            BrokerMessage::Ebt(EbtEvent::ReceivedClock(
+                                *req_no,
+                                peer_ssb_id,
+                                clock,
+                            )),
+                        ))
+                        .await?;
+                }
+
+                Ok(false)
             }
             // TODO: How to prevent duplicate handling of incoming MUXRPC
             // requests and responses? Bearing in mind that these types are
@@ -76,11 +100,10 @@ where
             // need to confirm this.
             //
             // Handle an incoming MUXRPC response.
-            /*
             RpcInput::Network(req_no, rpc::RecvMsg::RpcResponse(_type, res)) => {
-                self.recv_rpc_response(api, ch_broker, *req_no, res).await
+                self.recv_rpc_response(api, ch_broker, *req_no, res, peer_ssb_id)
+                    .await
             }
-            */
             // Handle an incoming MUXRPC 'cancel stream' response.
             RpcInput::Network(req_no, rpc::RecvMsg::CancelStreamResponse()) => {
                 self.recv_cancelstream(api, *req_no).await
@@ -90,6 +113,25 @@ where
                 self.recv_error_response(api, *req_no, err).await
             }
             // Handle a broker message.
+            RpcInput::Message(msg) => match msg {
+                BrokerMessage::Ebt(EbtEvent::SendClock(req_no, clock)) => {
+                    // Serialize the vector clock as a JSON string.
+                    let json_clock = serde_json::to_string(&clock)?;
+                    api.ebt_clock_res_send(*req_no, &json_clock).await?;
+
+                    Ok(false)
+                }
+                BrokerMessage::Ebt(EbtEvent::SendMessage(req_no, ssb_id, msg)) => {
+                    // Ensure the message is sent to the correct peer.
+                    if peer_ssb_id == *ssb_id {
+                        let json_msg = msg.to_string();
+                        api.ebt_feed_res_send(*req_no, &json_msg).await?;
+                    }
+
+                    Ok(false)
+                }
+                _ => Ok(false),
+            },
             /*
             RpcInput::Message(msg) => {
                 if let Some(kv_event) = msg.downcast_ref::<StoreKvEvent>() {
@@ -105,8 +147,6 @@ where
                 Ok(false)
             }
             */
-            // Handle a timer event.
-            //RpcInput::Timer => self.on_timer(api).await,
             _ => Ok(false),
         }
     }
@@ -126,6 +166,175 @@ where
             reqs: HashMap::new(),
             phantom: PhantomData,
         }
+    }
+
+    /// Process and respond to an incoming EBT replicate request.
+    async fn recv_ebtreplicate(
+        &mut self,
+        api: &mut ApiCaller<W>,
+        req_no: ReqNo,
+        req: &rpc::Body,
+        peer_ssb_id: String,
+    ) -> Result<bool> {
+        // Deserialize the args from an incoming EBT replicate request.
+        let mut args: Vec<dto::EbtReplicate> = serde_json::from_value(req.args.clone())?;
+        trace!(target: "ebt-handler", "Received replicate request: {:?}", args);
+
+        // Retrieve the `EbtReplicate` args from the array.
+        let args = args.pop().unwrap();
+
+        let mut ch_broker = BROKER.lock().await.create_sender();
+
+        // Validate the EBT request args (`version` and `format`).
+        // Terminate the stream with an error response if expectations are
+        // not met.
+        if !args.version == 3 {
+            let err_msg = String::from("ebt version != 3");
+
+            api.rpc().send_error(req_no, req.rpc_type, &err_msg).await?;
+
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    BrokerMessage::Ebt(EbtEvent::Error(err_msg, peer_ssb_id)),
+                ))
+                .await?;
+
+            return Ok(true);
+        } else if args.format.as_str() != "classic" {
+            let err_msg = String::from("ebt format != classic");
+
+            api.rpc().send_error(req_no, req.rpc_type, &err_msg).await?;
+
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    BrokerMessage::Ebt(EbtEvent::Error(err_msg, peer_ssb_id)),
+                ))
+                .await?;
+
+            return Ok(true);
+        }
+
+        trace!(target: "ebt-handler", "Successfully validated replicate request arguments");
+
+        /*
+        // Insert the request number and peer public key into the peers hash
+        // map.
+        self.peers.insert(req_no, peer_ssb_id.to_owned());
+        */
+
+        ch_broker
+            .send(BrokerEvent::new(
+                Destination::Broadcast,
+                BrokerMessage::Ebt(EbtEvent::SessionInitiated(
+                    req_no,
+                    peer_ssb_id,
+                    SessionRole::Responder,
+                )),
+            ))
+            .await?;
+
+        // TODO: Using `false` for now to keep the replication
+        // session alive.
+        Ok(false)
+    }
+
+    /// Process an incoming MUXRPC response. The response is expected to
+    /// contain a vector clock or an SSB message.
+    async fn recv_rpc_response(
+        &mut self,
+        _api: &mut ApiCaller<W>,
+        ch_broker: &mut ChBrokerSend,
+        req_no: ReqNo,
+        res: &[u8],
+        peer_ssb_id: String,
+    ) -> Result<bool> {
+        // Only handle the response if we made the request.
+        //if self.peers.contains_key(&req_no) {
+
+        // The response may be a vector clock (aka. notes) or an SSB message.
+        //
+        // Since there is no explicit way to determine which was received,
+        // we first attempt deserialization of a vector clock and move on
+        // to attempting message deserialization if that fails.
+        //
+        // TODO: Is matching on clock here redundant?
+        // We are already matching on `OtherRequest` in the handler.
+        if let Ok(clock) = serde_json::from_slice(res) {
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    BrokerMessage::Ebt(EbtEvent::ReceivedClock(req_no, peer_ssb_id, clock)),
+                ))
+                .await?;
+        } else {
+            // First try to deserialize the response into a message value.
+            // If that fails, try to deserialize into a message KVT and then
+            // convert that into a message value. Return an error if that fails.
+            // This approach allows us to handle the unlikely event that
+            // messages are sent as KVTs and not simply values.
+            //
+            // Validation of the message signature and fields is also performed
+            // as part of the call to `from_slice`.
+            let msg = match Message::from_slice(res) {
+                Ok(msg) => msg,
+                Err(_) => MessageKvt::from_slice(res)?.into_message()?,
+            };
+
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    BrokerMessage::Ebt(EbtEvent::ReceivedMessage(msg)),
+                ))
+                .await?;
+        }
+        //}
+
+        // TODO: Using `false` for now to keep the replication
+        // session alive.
+        Ok(false)
+
+        //} else {
+        //    Ok(false)
+        //}
+    }
+
+    /// Close the stream and remove the public key of the peer from the list
+    /// of active streams (`reqs`).
+    async fn recv_cancelstream(&mut self, api: &mut ApiCaller<W>, req_no: ReqNo) -> Result<bool> {
+        if let Some(key) = self.find_key_by_req_no(req_no) {
+            api.rpc().send_stream_eof(-req_no).await?;
+            self.reqs.remove(&key);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Report a MUXRPC error.
+    async fn recv_error_response(
+        &mut self,
+        _api: &mut ApiCaller<W>,
+        req_no: ReqNo,
+        error_msg: &str,
+    ) -> Result<bool> {
+        if let Some(key) = self.find_key_by_req_no(req_no) {
+            warn!("MUXRPC error {}", error_msg);
+            self.reqs.remove(&key);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Return the public key matching a given MUXRPC request.
+    /// In other words, return the author ID of a request.
+    fn find_key_by_req_no(&self, req_no: ReqNo) -> Option<String> {
+        self.reqs
+            .iter()
+            .find(|(_, val)| val.req_no == req_no)
+            .map(|(key, _)| key.clone())
     }
 
     /*
@@ -273,133 +482,6 @@ where
     }
     */
 
-    /// Process and respond to an incoming EBT replicate request.
-    async fn recv_ebtreplicate(
-        &mut self,
-        api: &mut ApiCaller<W>,
-        req_no: i32,
-        req: &rpc::Body,
-    ) -> Result<bool> {
-        // Deserialize the args from an incoming EBT replicate request.
-        let mut args: Vec<dto::EbtReplicate> = serde_json::from_value(req.args.clone())?;
-        trace!(target: "ebt-handler", "Received replicate request: {:?}", args);
-
-        // Retrieve the `EbtReplicate` args from the array.
-        let args = args.pop().unwrap();
-
-        // Validate the EBT request args (`version` and `format`).
-        // Terminate the stream with an error response if expectations are
-        // not met.
-        if !args.version == 3 {
-            api.rpc()
-                .send_error(req_no, req.rpc_type, "ebt version != 3")
-                .await?
-        } else if args.format.as_str() != "classic" {
-            api.rpc()
-                .send_error(req_no, req.rpc_type, "ebt format != classic")
-                .await?
-        }
-
-        trace!(target: "ebt-handler", "Successfully validated replicate request arguments");
-
-        // Now that validation has been performed successfully,
-        // send the local vector clock.
-        //
-        // TODO: Retrieve the clock with `Ebt::get_clock(local_id)`.
-
-        //api.ebt_clock_res_send(req.req_no, &clock).await?;
-
-        // TODO: Implement the send selection logic.
-        // Ie. Send names and values for control messages or send the
-        // requested messages themselves.
-
-        // This might be a good place to spawn the send / receive logic?
-        // How to interact with the underlying stream?
-        // We need the equivalent of:
-        // api.feed_res_send(req.req_no, &data).await?;
-        // but for EBT...
-        // Maybe feed_res_send is exactly what we want?
-        // And then we just need an equivalent for notes aka. vector clocks?
-
-        //api.ebt_feed_res_send(req.req_no, &feed).await?;
-
-        /*
-        This code will go in the message sender loop:
-
-        // Iterate over the range of requested messages, read them from the
-        // local key-value database and send them to the requesting peer.
-        // The "to" value (`last_seq`) is exclusive so we need to add one to
-        // include it in the range.
-        for n in req.from..(last_seq + 1) {
-            let data = KV_STORE.read().await.get_msg_kvt(&req_id, n)?.unwrap();
-            // Send either the whole KVT or just the value.
-            let data = if with_keys {
-                data.to_string()
-            } else {
-                data.value.to_string()
-            };
-            api.feed_res_send(req.req_no, &data).await?;
-        }
-        */
-
-        /*
-        // Define the first message in the sequence to be sent to the requester.
-        let from = args.seq.unwrap_or(1u64);
-
-        let mut req = HistoryStreamRequest { args, from, req_no };
-
-        // Send the requested messages from the local feed.
-        self.send_history(api, &mut req).await?;
-
-        if req.args.live.unwrap_or(false) {
-            // Keep the stream open for communication.
-            self.reqs.insert(req.args.id.clone(), req);
-        } else {
-            // Send an end of file response to the caller.
-            api.rpc().send_stream_eof(req_no).await?;
-        }
-        */
-
-        Ok(true)
-    }
-
-    /// Close the stream and remove the public key of the peer from the list
-    /// of active streams (`reqs`).
-    async fn recv_cancelstream(&mut self, api: &mut ApiCaller<W>, req_no: i32) -> Result<bool> {
-        if let Some(key) = self.find_key_by_req_no(req_no) {
-            api.rpc().send_stream_eof(-req_no).await?;
-            self.reqs.remove(&key);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    /// Report a MUXRPC error.
-    async fn recv_error_response(
-        &mut self,
-        _api: &mut ApiCaller<W>,
-        req_no: i32,
-        error_msg: &str,
-    ) -> Result<bool> {
-        if let Some(key) = self.find_key_by_req_no(req_no) {
-            warn!("MUXRPC error {}", error_msg);
-            self.reqs.remove(&key);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    /// Return the public key matching a given MUXRPC request.
-    /// In other words, return the author ID of a request.
-    fn find_key_by_req_no(&self, req_no: i32) -> Option<String> {
-        self.reqs
-            .iter()
-            .find(|(_, val)| val.req_no == req_no)
-            .map(|(key, _)| key.clone())
-    }
-
     /*
     /// Respond to a key-value store state change for the given peer.
     /// This is triggered when a new message is appended to the local feed.
@@ -421,66 +503,6 @@ where
         } else {
             Ok(false)
         }
-    }
-
-    /// Send a stream of messages from the local key-value database to a peer.
-    async fn send_history(
-        &mut self,
-        api: &mut ApiCaller<W>,
-        req: &mut HistoryStreamRequest,
-    ) -> Result<()> {
-        // Determine the public key of the feed being requested.
-        let req_id = if req.args.id.starts_with('@') {
-            req.args.id.clone()
-        } else {
-            format!("@{}", req.args.id).to_string()
-        };
-
-        // Lookup the sequence number of the most recently published message
-        // in the local feed.
-        let last_seq = KV_STORE.read().await.get_latest_seq(&req_id)?.unwrap_or(0);
-
-        // Determine if the messages should be sent as message values or as
-        // message KVTs (Key Value Timestamp).
-        // Defaults to message values if unset.
-        let with_keys = req.args.keys.unwrap_or(false);
-
-        // Only send messages that the peer doesn't already have
-        // (ie. if the requested `from` sequence number is smaller than or
-        // equal to the latest sequence number for that feed in the local
-        // database).
-        if req.from <= last_seq {
-            // Determine the public key of the peer who requested the history
-            // stream.
-            let requester = self
-                .find_key_by_req_no(req.req_no)
-                .unwrap_or_else(|| "unknown".to_string());
-
-            info!(
-                "sending messages authored by {} to {} (from sequence {} to {})",
-                req.args.id, requester, req.from, last_seq
-            );
-
-            // Iterate over the range of requested messages, read them from the
-            // local key-value database and send them to the requesting peer.
-            // The "to" value (`last_seq`) is exclusive so we need to add one to
-            // include it in the range.
-            for n in req.from..(last_seq + 1) {
-                let data = KV_STORE.read().await.get_msg_kvt(&req_id, n)?.unwrap();
-                // Send either the whole KVT or just the value.
-                let data = if with_keys {
-                    data.to_string()
-                } else {
-                    data.value.to_string()
-                };
-                api.feed_res_send(req.req_no, &data).await?;
-            }
-
-            // Update the starting sequence number for the request.
-            req.from = last_seq;
-        }
-
-        Ok(())
     }
     */
 }

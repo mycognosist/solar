@@ -5,7 +5,10 @@ use std::{collections::HashMap, marker::PhantomData};
 use async_std::io::Write;
 use futures::SinkExt;
 use kuska_ssb::{
-    api::{dto, ApiCaller, ApiMethod},
+    api::{
+        dto::{self, content::SsbId},
+        ApiCaller, ApiMethod,
+    },
     feed::{Feed as MessageKvt, Message},
     rpc,
 };
@@ -20,23 +23,13 @@ use crate::{
     Result,
 };
 
-#[derive(Debug)]
-struct EbtReplicateRequest {
-    req_no: ReqNo,
-    args: dto::EbtReplicate,
-    from: u64,
-}
-
 /// EBT replicate handler. Tracks active requests and peer connections.
 pub struct EbtReplicateHandler<W>
 where
     W: Write + Unpin + Send + Sync,
 {
-    initialized: bool,
-    _actor_id: usize,
-    // TODO: Consider renaming the `reqs` and `peers` fields.
-    reqs: HashMap<String, EbtReplicateRequest>,
-    peers: HashMap<ReqNo, String>,
+    /// EBT-related requests which are known and allowed.
+    active_requests: HashMap<ReqNo, SsbId>,
     phantom: PhantomData<W>,
 }
 
@@ -44,10 +37,6 @@ impl<W> EbtReplicateHandler<W>
 where
     W: Write + Unpin + Send + Sync,
 {
-    fn name(&self) -> &'static str {
-        "EbtReplicateHandler"
-    }
-
     /// Handle an RPC event.
     pub async fn handle(
         &mut self,
@@ -55,8 +44,17 @@ where
         op: &RpcInput,
         ch_broker: &mut ChBrokerSend,
         peer_ssb_id: String,
+        active_request: Option<ReqNo>,
     ) -> Result<bool> {
         trace!(target: "ebt-handler", "Received MUXRPC input: {:?}", op);
+
+        // An outbound EBT replicate request was made before the handler was
+        // called; add it to the map of active requests.
+        if let Some(session_req_no) = active_request {
+            let _ = self
+                .active_requests
+                .insert(session_req_no, peer_ssb_id.to_owned());
+        }
 
         match op {
             // Handle an incoming MUXRPC request.
@@ -87,18 +85,6 @@ where
 
                 Ok(false)
             }
-            // TODO: How to prevent duplicate handling of incoming MUXRPC
-            // requests and responses? Bearing in mind that these types are
-            // also handled in the history_stream handler...
-            //
-            // Answer: Match on `req_no` and ignore the message if it does not
-            // appear in `reqs`. But wait...is the `req_no` unique for each
-            // request or each connection?
-            //
-            // Also: The history_stream handler is only deployed if the EBT
-            // attempt fails, so there shouldn't be duplicate handling...
-            // need to confirm this.
-            //
             // Handle an incoming MUXRPC response.
             RpcInput::Network(req_no, rpc::RecvMsg::RpcResponse(_type, res)) => {
                 self.recv_rpc_response(api, ch_broker, *req_no, res, peer_ssb_id)
@@ -110,6 +96,9 @@ where
             }
             // Handle an incoming MUXRPC error response.
             RpcInput::Network(req_no, rpc::RecvMsg::ErrorResponse(err)) => {
+                // TODO: If this response is associated with a replicate
+                // request, emit an `EbtEvent::Error` so we can initiate
+                // `createHistoryStream` from the handler.
                 self.recv_error_response(api, *req_no, err).await
             }
             // Handle a broker message.
@@ -156,14 +145,10 @@ impl<W> EbtReplicateHandler<W>
 where
     W: Write + Unpin + Send + Sync,
 {
-    /// Instantiate a new instance of `EbtReplicateHandler` with the given
-    /// actor ID.
-    pub fn new(actor_id: usize) -> Self {
+    /// Instantiate a new instance of `EbtReplicateHandler`.
+    pub fn new() -> Self {
         Self {
-            _actor_id: actor_id,
-            initialized: false,
-            peers: HashMap::new(),
-            reqs: HashMap::new(),
+            active_requests: HashMap::new(),
             phantom: PhantomData,
         }
     }
@@ -218,11 +203,9 @@ where
 
         trace!(target: "ebt-handler", "Successfully validated replicate request arguments");
 
-        /*
-        // Insert the request number and peer public key into the peers hash
-        // map.
-        self.peers.insert(req_no, peer_ssb_id.to_owned());
-        */
+        // Insert the request number and peer public key into the active
+        // requests map.
+        self.active_requests.insert(req_no, peer_ssb_id.to_owned());
 
         ch_broker
             .send(BrokerEvent::new(
@@ -235,8 +218,6 @@ where
             ))
             .await?;
 
-        // TODO: Using `false` for now to keep the replication
-        // session alive.
         Ok(false)
     }
 
@@ -250,149 +231,73 @@ where
         res: &[u8],
         peer_ssb_id: String,
     ) -> Result<bool> {
-        // Only handle the response if we made the request.
-        //if self.peers.contains_key(&req_no) {
-
-        // The response may be a vector clock (aka. notes) or an SSB message.
-        //
-        // Since there is no explicit way to determine which was received,
-        // we first attempt deserialization of a vector clock and move on
-        // to attempting message deserialization if that fails.
-        //
-        // TODO: Is matching on clock here redundant?
-        // We are already matching on `OtherRequest` in the handler.
-        if let Ok(clock) = serde_json::from_slice(res) {
-            ch_broker
-                .send(BrokerEvent::new(
-                    Destination::Broadcast,
-                    BrokerMessage::Ebt(EbtEvent::ReceivedClock(req_no, peer_ssb_id, clock)),
-                ))
-                .await?;
-        } else {
-            // First try to deserialize the response into a message value.
-            // If that fails, try to deserialize into a message KVT and then
-            // convert that into a message value. Return an error if that fails.
-            // This approach allows us to handle the unlikely event that
-            // messages are sent as KVTs and not simply values.
+        // Only handle the response if the associated request number is known
+        // to us, either because we sent or received the initiating replicate
+        // request.
+        if self.active_requests.contains_key(&req_no) {
+            // The response may be a vector clock (aka. notes) or an SSB message.
             //
-            // Validation of the message signature and fields is also performed
-            // as part of the call to `from_slice`.
-            let msg = match Message::from_slice(res) {
-                Ok(msg) => msg,
-                Err(_) => MessageKvt::from_slice(res)?.into_message()?,
-            };
+            // Since there is no explicit way to determine which was received,
+            // we first attempt deserialization of a vector clock and move on
+            // to attempting message deserialization if that fails.
+            //
+            // TODO: Is matching on clock here redundant?
+            // We are already matching on `OtherRequest` in the handler.
+            if let Ok(clock) = serde_json::from_slice(res) {
+                ch_broker
+                    .send(BrokerEvent::new(
+                        Destination::Broadcast,
+                        BrokerMessage::Ebt(EbtEvent::ReceivedClock(req_no, peer_ssb_id, clock)),
+                    ))
+                    .await?;
+            } else {
+                // First try to deserialize the response into a message value.
+                // If that fails, try to deserialize into a message KVT and then
+                // convert that into a message value. Return an error if that fails.
+                // This approach allows us to handle the unlikely event that
+                // messages are sent as KVTs and not simply values.
+                //
+                // Validation of the message signature and fields is also performed
+                // as part of the call to `from_slice`.
+                let msg = match Message::from_slice(res) {
+                    Ok(msg) => msg,
+                    Err(_) => MessageKvt::from_slice(res)?.into_message()?,
+                };
 
-            ch_broker
-                .send(BrokerEvent::new(
-                    Destination::Broadcast,
-                    BrokerMessage::Ebt(EbtEvent::ReceivedMessage(msg)),
-                ))
-                .await?;
+                ch_broker
+                    .send(BrokerEvent::new(
+                        Destination::Broadcast,
+                        BrokerMessage::Ebt(EbtEvent::ReceivedMessage(msg)),
+                    ))
+                    .await?;
+            }
         }
-        //}
 
-        // TODO: Using `false` for now to keep the replication
-        // session alive.
         Ok(false)
-
-        //} else {
-        //    Ok(false)
-        //}
     }
 
-    /// Close the stream and remove the public key of the peer from the list
-    /// of active streams (`reqs`).
+    /// Close the stream and remove the associated request from the map of
+    /// active requests.
     async fn recv_cancelstream(&mut self, api: &mut ApiCaller<W>, req_no: ReqNo) -> Result<bool> {
-        if let Some(key) = self.find_key_by_req_no(req_no) {
-            api.rpc().send_stream_eof(-req_no).await?;
-            self.reqs.remove(&key);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        api.rpc().send_stream_eof(-req_no).await?;
+        self.active_requests.remove(&req_no);
+        Ok(true)
     }
 
-    /// Report a MUXRPC error.
+    /// Report a MUXRPC error and remove the associated request from the map of
+    /// active requests.
     async fn recv_error_response(
         &mut self,
         _api: &mut ApiCaller<W>,
         req_no: ReqNo,
         error_msg: &str,
     ) -> Result<bool> {
-        if let Some(key) = self.find_key_by_req_no(req_no) {
-            warn!("MUXRPC error {}", error_msg);
-            self.reqs.remove(&key);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    /// Return the public key matching a given MUXRPC request.
-    /// In other words, return the author ID of a request.
-    fn find_key_by_req_no(&self, req_no: ReqNo) -> Option<String> {
-        self.reqs
-            .iter()
-            .find(|(_, val)| val.req_no == req_no)
-            .map(|(key, _)| key.clone())
+        warn!("MUXRPC error {}", error_msg);
+        self.active_requests.remove(&req_no);
+        Ok(true)
     }
 
     /*
-    /// Initialize the EBT replicate handler.
-    ///
-    /// Calls `ebt_replicate` for every peer in the replication list,
-    /// requesting the latest messages.
-    async fn on_timer(&mut self, api: &mut ApiCaller<W>) -> Result<bool> {
-        if !self.initialized {
-            debug!("Initializing EBT replicate handler.");
-
-            // If local database resync has been selected...
-            if *RESYNC_CONFIG.get().unwrap() {
-                info!("Database resync selected; requesting local feed from peers.");
-                // Read the local public key from the secret config file.
-                let local_public_key = &SECRET_CONFIG.get().unwrap().public_key;
-                // Create a history stream request for the local feed.
-                let args = dto::CreateHistoryStreamIn::new(local_public_key.clone()).after_seq(1);
-                let req_id = api.create_history_stream_req_send(&args).await?;
-
-                // Insert the history stream request ID and peer public key
-                // into the peers hash map.
-                self.peers.insert(req_id, local_public_key.to_string());
-            }
-
-            // Loop through the public keys of all peers in the replication list.
-            for peer_pk in PEERS_TO_REPLICATE.get().unwrap().keys() {
-                // Instantiate the history stream request args for the given peer.
-                // The `live` arg means: keep the connection open after initial
-                // replication.
-                let mut args = dto::CreateHistoryStreamIn::new(format!("@{}", peer_pk)).live(true);
-
-                // Retrieve the sequence number of the most recent message for
-                // this peer from the local key-value store.
-                if let Some(last_seq) = KV_STORE.read().await.get_latest_seq(peer_pk)? {
-                    // Use the latest sequence number to update the request args.
-                    args = args.after_seq(last_seq);
-                }
-
-                // Send the history stream request.
-                let id = api.create_history_stream_req_send(&args).await?;
-
-                // Insert the history stream request ID and peer ID
-                // (public key) into the peers hash map.
-                self.peers.insert(id, peer_pk.to_string());
-
-                info!(
-                    "requesting messages authored by peer {} after {:?}",
-                    peer_pk, args.seq
-                );
-            }
-
-            self.initialized = true;
-        }
-
-        Ok(false)
-    }
-
     /// Extract blob references from post-type messages.
     fn extract_blob_refs(&mut self, msg: &Message) -> Vec<String> {
         let mut refs = Vec::new();

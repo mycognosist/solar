@@ -21,7 +21,7 @@ use serde_json::Value;
 use crate::{
     actors::{
         muxrpc::ReqNo,
-        network::connection::ConnectionData,
+        network::{connection::ConnectionData, connection_manager::ConnectionEvent},
         replication::ebt::{clock, replicator, EncodedClockValue, VectorClock},
     },
     broker::{ActorEndpoint, BrokerEvent, BrokerMessage, Destination, BROKER},
@@ -41,6 +41,7 @@ pub enum EbtEvent {
     ReceivedClock(ReqNo, SsbId, VectorClock),
     ReceivedMessage(Message),
     SessionConcluded(SsbId),
+    SessionTimeout(ConnectionData),
     Error(String, SsbId),
 }
 
@@ -369,6 +370,23 @@ impl EbtManager {
         self.remove_session(&peer_ssb_id);
     }
 
+    async fn handle_session_timeout(&mut self, connection_data: ConnectionData) -> Result<()> {
+        trace!(target: "ebt-replication", "Session timeout while waiting for request");
+
+        // Create channel to send messages to broker.
+        let mut ch_broker = BROKER.lock().await.create_sender();
+
+        // Fallback to classic replication.
+        ch_broker
+            .send(BrokerEvent::new(
+                Destination::Broadcast,
+                BrokerMessage::Connection(ConnectionEvent::ReplicatingClassic(connection_data)),
+            ))
+            .await?;
+
+        Ok(())
+    }
+
     async fn handle_error(&mut self, err: String, peer_ssb_id: SsbId) {
         trace!(target: "ebt-replication", "Session error with {}: {}", peer_ssb_id, err);
         // The active session should be removed by the 'session concluded'
@@ -440,6 +458,11 @@ impl EbtManager {
                             }
                             EbtEvent::SessionConcluded(connection_data) => {
                                 self.handle_session_concluded(connection_data).await;
+                            }
+                            EbtEvent::SessionTimeout(connection_data) => {
+                                if let Err(err) = self.handle_session_timeout(connection_data).await {
+                                    error!("Error while handling 'session timeout' event: {}", err)
+                                }
                             }
                             EbtEvent::Error(err, peer_ssb_id) => {
                                 self.handle_error(err, peer_ssb_id).await;

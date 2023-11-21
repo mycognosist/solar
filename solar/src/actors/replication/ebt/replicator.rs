@@ -28,7 +28,6 @@ pub async fn run(
     let ActorEndpoint {
         ch_terminate,
         ch_msg,
-        actor_id,
         ..
     } = BROKER
         .lock()
@@ -57,7 +56,7 @@ pub async fn run(
     let mut api = ApiCaller::new(rpc_writer);
 
     // Instantiate the MUXRPC handler.
-    let mut ebt_replicate_handler = EbtReplicateHandler::new(actor_id);
+    let mut ebt_replicate_handler = EbtReplicateHandler::new();
 
     // Fuse internal termination channel with external channel.
     // This allows termination of the peer loop to be initiated from outside
@@ -74,19 +73,22 @@ pub async fn run(
     trace!(target: "ebt-session", "Initiating EBT replication session with: {}", peer_ssb_id);
 
     let mut session_initiated = false;
-    let mut ebt_begin_waiting = None;
+    let mut replicate_req_no = None;
+
+    // Record the time at which we begin the EBT session.
+    //
+    // This is later used to implement a timeout if no request or response is
+    // received.
+    let ebt_session_start = Instant::now();
 
     if let SessionRole::Requester = session_role {
         // Send EBT request.
         let ebt_args = EbtReplicate::default();
-        api.ebt_replicate_req_send(&ebt_args).await?;
-    } else {
-        // Record the time at which we begin waiting to receive an EBT
-        // replicate request.
-        //
-        // This is later used to break out of the loop if no request
-        // is received within the given time allowance.
-        ebt_begin_waiting = Some(Instant::now());
+        let req_no = api.ebt_replicate_req_send(&ebt_args).await?;
+        // Set the request number to be passed into the MUXRPC EBT handler.
+        // This allows tracking of the request (ensuring we respond to
+        // MUXRPC responses with this request number).
+        replicate_req_no = Some(req_no);
     }
 
     loop {
@@ -117,10 +119,16 @@ pub async fn run(
         };
 
         match ebt_replicate_handler
-            .handle(&mut api, &input, &mut ch_broker, peer_ssb_id.to_owned())
+            .handle(
+                &mut api,
+                &input,
+                &mut ch_broker,
+                peer_ssb_id.to_owned(),
+                replicate_req_no,
+            )
             .await
         {
-            Ok(handled) if handled == true => break,
+            Ok(true) => break,
             Err(err) => {
                 error!("EBT replicate handler failed: {:?}", err);
 
@@ -132,21 +140,24 @@ pub async fn run(
         }
 
         // If no active session has been initiated within 5 seconds of
-        // waiting to receive a replicate request, exit the replication
-        // loop and send an outbound request.
-        if let Some(time) = ebt_begin_waiting {
-            if !session_initiated && time.elapsed() >= Duration::from_secs(session_wait_timeout) {
-                ch_broker
-                    .send(BrokerEvent::new(
-                        Destination::Broadcast,
-                        BrokerMessage::Ebt(EbtEvent::RequestSession(connection_data)),
-                    ))
-                    .await?;
+        // waiting to receive a replicate request, broadcast a session timeout
+        // event (leading to initiation of classic replication).
+        if !session_initiated
+            && session_role == SessionRole::Responder
+            && ebt_session_start.elapsed() >= Duration::from_secs(session_wait_timeout)
+        {
+            trace!(target: "ebt-session", "Timeout while waiting for {} to initiate EBT replication session", peer_ssb_id);
 
-                // Break out of the input processing loop to conclude
-                // the replication session.
-                break;
-            }
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    BrokerMessage::Ebt(EbtEvent::SessionTimeout(connection_data)),
+                ))
+                .await?;
+
+            // Break out of the input processing loop to conclude
+            // the replication session.
+            break;
         }
     }
 

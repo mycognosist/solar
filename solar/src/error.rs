@@ -6,6 +6,8 @@ use jsonrpsee::types::error::SERVER_ERROR_MSG;
 use kuska_ssb::{api, crypto, discovery, feed, handshake, rpc};
 use toml::{de, ser};
 
+use crate::actors::muxrpc::ReqNo;
+
 /// Possible solar errors.
 #[derive(Debug)]
 pub enum Error {
@@ -21,6 +23,8 @@ pub enum Error {
     Database(sled::Error),
     /// Failed to deserialization TOML.
     DeserializeToml(de::Error),
+    /// EBT replicate request received an error response.
+    EbtReplicate((ReqNo, String)),
     /// Failed to send message on futures channel.
     FuturesChannel(mpsc::SendError),
     /// Database indexes.
@@ -71,6 +75,10 @@ impl fmt::Display for Error {
             Error::Crypto(err) => write!(f, "SSB cryptographic error: {err}"),
             Error::Database(err) => write!(f, "Key-value database error: {err}"),
             Error::DeserializeToml(err) => write!(f, "Failed to deserialize TOML: {err}"),
+            Error::EbtReplicate((req_no, err)) => write!(
+                f,
+                "EBT replication error: request number {req_no} returned {err}"
+            ),
             Error::FuturesChannel(err) => {
                 write!(f, "Failed to send message on futures channel: {err}")
             }

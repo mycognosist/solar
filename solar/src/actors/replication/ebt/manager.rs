@@ -42,7 +42,7 @@ pub enum EbtEvent {
     ReceivedMessage(Message),
     SessionConcluded(SsbId),
     SessionTimeout(ConnectionData),
-    Error(String, SsbId),
+    Error(ConnectionData, ReqNo, SsbId, String),
 }
 
 /// Role of a peer in an EBT session.
@@ -387,11 +387,27 @@ impl EbtManager {
         Ok(())
     }
 
-    async fn handle_error(&mut self, err: String, peer_ssb_id: SsbId) {
-        trace!(target: "ebt-replication", "Session error with {}: {}", peer_ssb_id, err);
-        // The active session should be removed by the 'session concluded'
-        // handler but we attempt removal here just in case.
-        self.remove_session(&peer_ssb_id);
+    async fn handle_error(
+        &mut self,
+        connection_data: ConnectionData,
+        req_no: ReqNo,
+        peer_ssb_id: SsbId,
+        err_msg: String,
+    ) -> Result<()> {
+        trace!(target: "ebt-replication", "Session error with {} for request number {}: {}", peer_ssb_id, req_no, err_msg);
+
+        // Create channel to send messages to broker.
+        let mut ch_broker = BROKER.lock().await.create_sender();
+
+        // Fallback to classic replication.
+        ch_broker
+            .send(BrokerEvent::new(
+                Destination::Broadcast,
+                BrokerMessage::Connection(ConnectionEvent::ReplicatingClassic(connection_data)),
+            ))
+            .await?;
+
+        Ok(())
     }
 
     /// Start the EBT event loop.
@@ -464,8 +480,10 @@ impl EbtManager {
                                     error!("Error while handling 'session timeout' event: {}", err)
                                 }
                             }
-                            EbtEvent::Error(err, peer_ssb_id) => {
-                                self.handle_error(err, peer_ssb_id).await;
+                            EbtEvent::Error(connection_data, req_no, peer_ssb_id, err_msg) => {
+                                if let Err(err) = self.handle_error(connection_data, req_no, peer_ssb_id, err_msg).await {
+                                    error!("Error while handling 'error' event: {}", err)
+                                }
                             }
                         }
                     }

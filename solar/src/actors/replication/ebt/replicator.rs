@@ -132,6 +132,20 @@ pub async fn run(
             Err(err) => {
                 error!("EBT replicate handler failed: {:?}", err);
 
+                if let Error::EbtReplicate((req_no, err_msg)) = err {
+                    ch_broker
+                        .send(BrokerEvent::new(
+                            Destination::Broadcast,
+                            BrokerMessage::Ebt(EbtEvent::Error(
+                                connection_data,
+                                req_no,
+                                peer_ssb_id.to_owned(),
+                                err_msg,
+                            )),
+                        ))
+                        .await?;
+                }
+
                 // Break out of the input processing loop to conclude
                 // the replication session.
                 break;

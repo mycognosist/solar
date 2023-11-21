@@ -20,6 +20,7 @@ use crate::{
         replication::ebt::{EbtEvent, SessionRole},
     },
     broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination, BROKER},
+    error::Error,
     Result,
 };
 
@@ -96,10 +97,7 @@ where
             }
             // Handle an incoming MUXRPC error response.
             RpcInput::Network(req_no, rpc::RecvMsg::ErrorResponse(err)) => {
-                // TODO: If this response is associated with a replicate
-                // request, emit an `EbtEvent::Error` so we can initiate
-                // `createHistoryStream` from the handler.
-                self.recv_error_response(api, *req_no, err).await
+                self.recv_error_response(*req_no, err).await
             }
             // Handle a broker message.
             RpcInput::Message(msg) => match msg {
@@ -175,30 +173,14 @@ where
         // not met.
         if !args.version == 3 {
             let err_msg = String::from("ebt version != 3");
-
             api.rpc().send_error(req_no, req.rpc_type, &err_msg).await?;
 
-            ch_broker
-                .send(BrokerEvent::new(
-                    Destination::Broadcast,
-                    BrokerMessage::Ebt(EbtEvent::Error(err_msg, peer_ssb_id)),
-                ))
-                .await?;
-
-            return Ok(true);
+            return Err(Error::EbtReplicate((req_no, err_msg)));
         } else if args.format.as_str() != "classic" {
             let err_msg = String::from("ebt format != classic");
-
             api.rpc().send_error(req_no, req.rpc_type, &err_msg).await?;
 
-            ch_broker
-                .send(BrokerEvent::new(
-                    Destination::Broadcast,
-                    BrokerMessage::Ebt(EbtEvent::Error(err_msg, peer_ssb_id)),
-                ))
-                .await?;
-
-            return Ok(true);
+            return Err(Error::EbtReplicate((req_no, err_msg)));
         }
 
         trace!(target: "ebt-handler", "Successfully validated replicate request arguments");
@@ -286,15 +268,12 @@ where
 
     /// Report a MUXRPC error and remove the associated request from the map of
     /// active requests.
-    async fn recv_error_response(
-        &mut self,
-        _api: &mut ApiCaller<W>,
-        req_no: ReqNo,
-        error_msg: &str,
-    ) -> Result<bool> {
-        warn!("MUXRPC error {}", error_msg);
+    async fn recv_error_response(&mut self, req_no: ReqNo, err_msg: &str) -> Result<bool> {
+        warn!("Received MUXRPC error response: {}", err_msg);
+
         self.active_requests.remove(&req_no);
-        Ok(true)
+
+        Err(Error::EbtReplicate((req_no, err_msg.to_string())))
     }
 
     /*

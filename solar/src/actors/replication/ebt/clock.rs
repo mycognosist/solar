@@ -13,7 +13,7 @@ pub type VectorClock = HashMap<SsbId, EncodedClockValue>;
 /// Decode a value from a control message (aka. note), returning the values
 /// of the replicate flag, receive flag and sequence.
 ///
-/// If the replicate flag is `false`, the peer does not wish to receive
+/// If the replicate flag is `false`, the peer does not wish to replicate
 /// messages for the referenced feed.
 ///
 /// If the replicate flag is `true`, values will be returned for the receive

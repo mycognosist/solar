@@ -30,16 +30,15 @@ creation.
  - **Keypair creation:** Automatically generate a new public-private keypair
  - **Feed generation:** Store published and replicated messages in a key-value database
  - **LAN discovery:** Broadcast and listen for peer connection messages over UDP
+ - **EBT replication:** Replicate with peers using epidemic broadcast trees
  - **Legacy replication:** Replicate with peers using MUXRPC (`createHistoryStream` etc.)
  - **Local feed resync:** Recover lost local feed messages from peers
- - **Interoperability:** Connect and replicate with [Patchwork](https://github.com/ssbc/patchwork)
-   and [Go-SSB](https://github.com/ssbc/go-ssb)¹
+ - **Interoperability:** Connect and replicate with [Manyverse](https://www.manyver.se/),
+   [Patchwork](https://github.com/ssbc/patchwork) and [Go-SSB](https://github.com/ssbc/go-ssb)
  - **Selective replication:** Only replicate with specified peers
  - **JSON-RPC interface:** Interact with the node using JSON-RPC over HTTP
  - **Alternative network key:** Operate with a unique network key
  - **Database indexes:** Look up state with efficient queries
-
-_¹ - this is possible because those implementations support legacy replication (using `createHistoryStream`)_
 
 ## Installation
 

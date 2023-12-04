@@ -66,9 +66,9 @@ pub struct EbtManager {
     /// Active EBT peer sessions.
     active_sessions: HashSet<SsbId>,
     /// Duration to wait before switching feed request to a different peer.
-    feed_wait_timeout: u64,
+    _feed_wait_timeout: u64,
     /// The state of the replication loop.
-    is_replication_loop_active: bool,
+    _is_replication_loop_active: bool,
     /// The local vector clock.
     local_clock: VectorClock,
     /// The SSB ID of the local node.
@@ -79,7 +79,7 @@ pub struct EbtManager {
     ///
     /// This allows us to avoid requesting a feed from multiple peers
     /// simultaneously.
-    requested_feeds: HashSet<SsbId>,
+    _requested_feeds: HashSet<SsbId>,
     /// Duration to wait for a connected peer to initiate an EBT session.
     session_wait_timeout: u64,
 }
@@ -88,12 +88,12 @@ impl Default for EbtManager {
     fn default() -> Self {
         EbtManager {
             active_sessions: HashSet::new(),
-            feed_wait_timeout: 3,
-            is_replication_loop_active: false,
+            _feed_wait_timeout: 3,
+            _is_replication_loop_active: false,
             local_clock: HashMap::new(),
             local_id: String::new(),
             peer_clocks: HashMap::new(),
-            requested_feeds: HashSet::new(),
+            _requested_feeds: HashSet::new(),
             session_wait_timeout: 5,
         }
     }
@@ -131,7 +131,7 @@ impl EbtManager {
     }
 
     /// Retrieve the vector clock for the given SSB ID.
-    fn get_clock(self, peer_id: &SsbId) -> Option<VectorClock> {
+    fn _get_clock(self, peer_id: &SsbId) -> Option<VectorClock> {
         if peer_id == &self.local_id {
             Some(self.local_clock)
         } else {
@@ -180,13 +180,13 @@ impl EbtManager {
 
     /// Revoke a replication request for the feed represented by the given SSB
     /// ID.
-    fn revoke(&mut self, peer_id: &SsbId) {
+    fn _revoke(&mut self, peer_id: &SsbId) {
         self.local_clock.remove(peer_id);
     }
 
     /// Request the feed represented by the given SSB ID from a peer.
-    fn request(&mut self, peer_id: &SsbId) {
-        self.requested_feeds.insert(peer_id.to_owned());
+    fn _request(&mut self, peer_id: &SsbId) {
+        self._requested_feeds.insert(peer_id.to_owned());
     }
 
     /// Decode a peer's vector clock and retrieve all requested messages.

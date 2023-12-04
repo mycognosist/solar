@@ -1,10 +1,12 @@
-use std::{fmt, io, net};
+use std::{fmt, io, net, num};
 
 use futures::channel::mpsc;
 use jsonrpsee::types::error::ErrorObjectOwned as JsonRpcErrorOwned;
 use jsonrpsee::types::error::SERVER_ERROR_MSG;
 use kuska_ssb::{api, crypto, discovery, feed, handshake, rpc};
 use toml::{de, ser};
+
+use crate::actors::muxrpc::ReqNo;
 
 /// Possible solar errors.
 #[derive(Debug)]
@@ -21,6 +23,8 @@ pub enum Error {
     Database(sled::Error),
     /// Failed to deserialization TOML.
     DeserializeToml(de::Error),
+    /// EBT replicate request received an error response.
+    EbtReplicate((ReqNo, String)),
     /// Failed to send message on futures channel.
     FuturesChannel(mpsc::SendError),
     /// Database indexes.
@@ -50,6 +54,8 @@ pub enum Error {
     SerializeToml(ser::Error),
     /// SSB API error.
     SsbApi(api::Error),
+    /// TryFromInt error.
+    TryFromInt(num::TryFromIntError),
     /// URL parsing error.
     UrlParse(url::ParseError),
     /// SSB message validation error.
@@ -69,6 +75,10 @@ impl fmt::Display for Error {
             Error::Crypto(err) => write!(f, "SSB cryptographic error: {err}"),
             Error::Database(err) => write!(f, "Key-value database error: {err}"),
             Error::DeserializeToml(err) => write!(f, "Failed to deserialize TOML: {err}"),
+            Error::EbtReplicate((req_no, err)) => write!(
+                f,
+                "EBT replication error: request number {req_no} returned {err}"
+            ),
             Error::FuturesChannel(err) => {
                 write!(f, "Failed to send message on futures channel: {err}")
             }
@@ -89,6 +99,7 @@ impl fmt::Display for Error {
             Error::SerdeJson(err) => write!(f, "Serde JSON error: {err}"),
             Error::SerializeToml(err) => write!(f, "Failed to serialize TOML: {err}"),
             Error::SsbApi(err) => write!(f, "SSB API error: {err}"),
+            Error::TryFromInt(err) => write!(f, "Integer conversion error: {err}"),
             Error::UrlParse(err) => write!(f, "Failed to parse URL: {err}"),
             Error::Validation(err) => write!(f, "Message validation error: {err}"),
             Error::Other(err) => write!(f, "Uncategorized error: {err}"),
@@ -183,6 +194,12 @@ impl From<ser::Error> for Error {
 impl From<api::Error> for Error {
     fn from(err: api::Error) -> Error {
         Error::SsbApi(err)
+    }
+}
+
+impl From<num::TryFromIntError> for Error {
+    fn from(err: num::TryFromIntError) -> Error {
+        Error::TryFromInt(err)
     }
 }
 

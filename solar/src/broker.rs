@@ -12,6 +12,7 @@ use crate::{
     actors::{
         muxrpc::{RpcBlobsGetEvent, RpcBlobsWantsEvent},
         network::{connection_manager::ConnectionEvent, connection_scheduler::DialRequest},
+        replication::ebt::EbtEvent,
     },
     storage::{blob::StoreBlobEvent, kv::StoreKvEvent},
     Result,
@@ -24,6 +25,7 @@ pub struct Void {}
 pub enum BrokerMessage {
     Connection(ConnectionEvent),
     Dial(DialRequest),
+    Ebt(EbtEvent),
     RpcBlobsGet(RpcBlobsGetEvent),
     RpcBlobsWants(RpcBlobsWantsEvent),
     StoreBlob(StoreBlobEvent),

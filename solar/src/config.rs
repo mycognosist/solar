@@ -83,13 +83,20 @@ impl ApplicationConfig {
         config.secret = SecretConfig::return_or_create_file(&base_path)?;
         config.base_path = Some(base_path);
 
+        // Add @-prefix to all peer IDs. This is required for successful
+        // replication when using either classic or EBT replication methods.
+        let mut replication_peers = HashMap::new();
+        for (id, addr) in &config.replication.peers {
+            replication_peers.insert(format!("@{}", id), addr.to_owned());
+        }
+
         // Log the list of public keys identifying peers whose data will be replicated.
-        debug!("Peers to be replicated are {:?}", &config.replication.peers);
+        debug!("Peers to be replicated are {:?}", &replication_peers);
 
         // Set the value of the network key (aka. secret handshake key or caps key).
         let _err = NETWORK_KEY.set(config.network.key.to_owned());
         // Set the value of the peers to replicate cell.
-        let _err = PEERS_TO_REPLICATE.set(config.replication.peers.to_owned());
+        let _err = PEERS_TO_REPLICATE.set(replication_peers);
         // Set the value of the resync configuration cell.
         let _err = RESYNC_CONFIG.set(config.replication.resync);
         // Set the value of the secret configuration cell.

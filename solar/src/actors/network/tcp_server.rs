@@ -34,8 +34,8 @@ pub async fn actor(
                         debug!("Received inbound TCP connection");
                         Broker::spawn(
                             connection::actor(
-                                server_id.clone(),
                                 TcpConnection::Listen { stream },
+                                server_id.clone(),
                                 selective_replication
                             )
                         );

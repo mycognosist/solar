@@ -31,7 +31,6 @@ use crate::{
     Result,
 };
 
-//pub async fn actor<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send + Sync>(
 pub async fn actor(connection_data: ConnectionData) -> Result<()> {
     let mut ch_broker = BROKER.lock().await.create_sender();
 

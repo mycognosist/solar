@@ -82,13 +82,15 @@ pub fn encode(
 mod test {
     use super::*;
 
-    const VALUES: [i64; 5] = [-1, 0, 1, 2, 3];
-    const NOTES: [(bool, std::option::Option<bool>, std::option::Option<u64>); 5] = [
+    const VALUES: [i64; 7] = [-1, 0, 1, 2, 3, 12, 450];
+    const NOTES: [(bool, std::option::Option<bool>, std::option::Option<u64>); 7] = [
         (false, None, None),
         (true, Some(true), Some(0)),
         (true, Some(false), Some(0)),
         (true, Some(true), Some(1)),
         (true, Some(false), Some(1)),
+        (true, Some(true), Some(6)),
+        (true, Some(true), Some(225)),
     ];
 
     #[test]

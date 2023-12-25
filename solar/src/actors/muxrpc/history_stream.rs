@@ -4,21 +4,19 @@ use async_std::io::Write;
 use async_trait::async_trait;
 use futures::SinkExt;
 use kuska_ssb::{
-    api::{
-        dto::{self, content::TypedMessage},
-        ApiCaller, ApiMethod,
-    },
+    api::{dto, ApiCaller, ApiMethod},
     feed::{Feed as MessageKvt, Message},
     rpc,
 };
 use log::{debug, info, warn};
-use once_cell::sync::Lazy;
-use regex::Regex;
 
 use crate::{
-    actors::muxrpc::{
-        blobs_get::RpcBlobsGetEvent,
-        handler::{RpcHandler, RpcInput},
+    actors::{
+        muxrpc::{
+            blobs_get::RpcBlobsGetEvent,
+            handler::{RpcHandler, RpcInput},
+        },
+        replication::blobs,
     },
     broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination},
     config::{PEERS_TO_REPLICATE, RESYNC_CONFIG, SECRET_CONFIG},
@@ -219,7 +217,7 @@ where
                 // Extract blob references from the received message and
                 // request those blobs if they are not already in the local
                 // blobstore.
-                for key in blobs_get::extract_blob_refs(&msg) {
+                for key in blobs::extract_blob_refs(&msg) {
                     if !BLOB_STORE.read().await.exists(&key) {
                         let event = RpcBlobsGetEvent(dto::BlobsGetIn::new(key));
                         let broker_msg = BrokerEvent::new(

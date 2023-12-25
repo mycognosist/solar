@@ -29,26 +29,6 @@ use crate::{
     Result,
 };
 
-/// Regex pattern used to match blob references.
-pub static BLOB_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(&[0-9A-Za-z/+=]*.sha256)").unwrap());
-
-/// Extract blob references from post-type messages.
-pub fn extract_blob_refs(msg: &Message) -> Vec<String> {
-    let mut refs = Vec::new();
-
-    let msg = serde_json::from_value(msg.content().clone());
-
-    if let Ok(TypedMessage::Post { text, .. }) = msg {
-        for cap in BLOB_REGEX.captures_iter(&text) {
-            let key = cap.get(0).unwrap().as_str().to_owned();
-            refs.push(key);
-        }
-    }
-
-    refs
-}
-
 #[derive(Debug)]
 struct HistoryStreamRequest {
     req_no: i32,
@@ -239,13 +219,9 @@ where
                 // Extract blob references from the received message and
                 // request those blobs if they are not already in the local
                 // blobstore.
-                for key in extract_blob_refs(&msg) {
+                for key in blobs_get::extract_blob_refs(&msg) {
                     if !BLOB_STORE.read().await.exists(&key) {
-                        let event = RpcBlobsGetEvent(dto::BlobsGetIn {
-                            key,
-                            size: None,
-                            max: None,
-                        });
+                        let event = RpcBlobsGetEvent(dto::BlobsGetIn::new(key));
                         let broker_msg = BrokerEvent::new(
                             Destination::Broadcast,
                             BrokerMessage::RpcBlobsGet(event),

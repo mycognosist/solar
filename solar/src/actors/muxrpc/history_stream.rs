@@ -9,13 +9,14 @@ use kuska_ssb::{
     rpc,
 };
 use log::{debug, info, warn};
-use once_cell::sync::Lazy;
-use regex::Regex;
 
 use crate::{
-    actors::muxrpc::{
-        blobs_get::RpcBlobsGetEvent,
-        handler::{RpcHandler, RpcInput},
+    actors::{
+        muxrpc::{
+            blobs_get::RpcBlobsGetEvent,
+            handler::{RpcHandler, RpcInput},
+        },
+        replication::blobs,
     },
     broker::{BrokerEvent, BrokerMessage, ChBrokerSend, Destination},
     config::{PEERS_TO_REPLICATE, RESYNC_CONFIG, SECRET_CONFIG},
@@ -25,10 +26,6 @@ use crate::{
     storage::kv::StoreKvEvent,
     Result,
 };
-
-/// Regex pattern used to match blob references.
-pub static BLOB_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(&[0-9A-Za-z/+=]*.sha256)").unwrap());
 
 #[derive(Debug)]
 struct HistoryStreamRequest {
@@ -174,22 +171,6 @@ where
         Ok(false)
     }
 
-    /// Extract blob references from post-type messages.
-    fn extract_blob_refs(&mut self, msg: &Message) -> Vec<String> {
-        let mut refs = Vec::new();
-
-        let msg = serde_json::from_value(msg.content().clone());
-
-        if let Ok(dto::content::TypedMessage::Post { text, .. }) = msg {
-            for cap in BLOB_REGEX.captures_iter(&text) {
-                let key = cap.get(0).unwrap().as_str().to_owned();
-                refs.push(key);
-            }
-        }
-
-        refs
-    }
-
     /// Process an incoming MUXRPC response. The response is expected to
     /// contain an SSB message.
     async fn recv_rpc_response(
@@ -236,13 +217,9 @@ where
                 // Extract blob references from the received message and
                 // request those blobs if they are not already in the local
                 // blobstore.
-                for key in self.extract_blob_refs(&msg) {
+                for key in blobs::extract_blob_refs(&msg) {
                     if !BLOB_STORE.read().await.exists(&key) {
-                        let event = RpcBlobsGetEvent(dto::BlobsGetIn {
-                            key,
-                            size: None,
-                            max: None,
-                        });
+                        let event = RpcBlobsGetEvent(dto::BlobsGetIn::new(key));
                         let broker_msg = BrokerEvent::new(
                             Destination::Broadcast,
                             BrokerMessage::RpcBlobsGet(event),

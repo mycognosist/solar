@@ -14,19 +14,26 @@ use std::{
 
 use async_std::task;
 use futures::{select_biased, FutureExt, SinkExt, StreamExt};
-use kuska_ssb::{api::dto::content::SsbId, crypto::ToSsbId, feed::Message};
+use kuska_ssb::{
+    api::dto::{content::SsbId, BlobsGetIn},
+    crypto::ToSsbId,
+    feed::Message,
+};
 use log::{debug, error, trace, warn};
 use serde_json::Value;
 
 use crate::{
     actors::{
-        muxrpc::ReqNo,
+        muxrpc::{ReqNo, RpcBlobsGetEvent},
         network::{connection::ConnectionData, connection_manager::ConnectionEvent},
-        replication::ebt::{clock, replicator, EncodedClockValue, VectorClock},
+        replication::{
+            blobs,
+            ebt::{clock, replicator, EncodedClockValue, VectorClock},
+        },
     },
     broker::{ActorEndpoint, BrokerEvent, BrokerMessage, Destination, BROKER},
     config::PEERS_TO_REPLICATE,
-    node::KV_STORE,
+    node::{BLOB_STORE, KV_STORE},
     Result,
 };
 
@@ -354,6 +361,21 @@ impl EbtManager {
                 msg.sequence(),
                 msg.author()
             );
+
+            // Create channel to send messages to broker.
+            let mut ch_broker = BROKER.lock().await.create_sender();
+
+            // Extract blob references from the received message and
+            // request those blobs if they are not already in the local
+            // blobstore.
+            for key in blobs::extract_blob_refs(&msg) {
+                if !BLOB_STORE.read().await.exists(&key) {
+                    let event = RpcBlobsGetEvent(BlobsGetIn::new(key));
+                    let broker_msg =
+                        BrokerEvent::new(Destination::Broadcast, BrokerMessage::RpcBlobsGet(event));
+                    ch_broker.send(broker_msg).await?;
+                }
+            }
         } else {
             warn!(
                 "Received out-of-order message from {}; received: {}, expected: {} + 1",

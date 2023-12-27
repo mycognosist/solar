@@ -88,7 +88,7 @@ where
             }
             // Handle an incoming MUXRPC response.
             RpcInput::Network(req_no, rpc::RecvMsg::RpcResponse(_type, res)) => {
-                self.recv_rpc_response(api, ch_broker, *req_no, res, peer_ssb_id)
+                self.recv_rpc_response(ch_broker, *req_no, res, peer_ssb_id)
                     .await
             }
             // Handle an incoming MUXRPC 'cancel stream' response.
@@ -119,21 +119,6 @@ where
                 }
                 _ => Ok(false),
             },
-            /*
-            RpcInput::Message(msg) => {
-                if let Some(kv_event) = msg.downcast_ref::<StoreKvEvent>() {
-                    match kv_event {
-                        // Notification from the key-value store indicating that
-                        // a new message has just been appended to the feed
-                        // identified by `id`.
-                        StoreKvEvent::IdChanged(id) => {
-                            return self.recv_storageevent_idchanged(api, id).await
-                        }
-                    }
-                }
-                Ok(false)
-            }
-            */
             _ => Ok(false),
         }
     }
@@ -207,7 +192,6 @@ where
     /// contain a vector clock or an SSB message.
     async fn recv_rpc_response(
         &mut self,
-        _api: &mut ApiCaller<W>,
         ch_broker: &mut ChBrokerSend,
         req_no: ReqNo,
         res: &[u8],
@@ -263,6 +247,7 @@ where
     async fn recv_cancelstream(&mut self, api: &mut ApiCaller<W>, req_no: ReqNo) -> Result<bool> {
         api.rpc().send_stream_eof(-req_no).await?;
         self.active_requests.remove(&req_no);
+
         Ok(true)
     }
 
@@ -277,22 +262,6 @@ where
     }
 
     /*
-    /// Extract blob references from post-type messages.
-    fn extract_blob_refs(&mut self, msg: &Message) -> Vec<String> {
-        let mut refs = Vec::new();
-
-        let msg = serde_json::from_value(msg.content().clone());
-
-        if let Ok(dto::content::TypedMessage::Post { text, .. }) = msg {
-            for cap in BLOB_REGEX.captures_iter(&text) {
-                let key = cap.get(0).unwrap().as_str().to_owned();
-                refs.push(key);
-            }
-        }
-
-        refs
-    }
-
     /// Process an incoming MUXRPC response. The response is expected to
     /// contain an SSB message.
     async fn recv_rpc_response(
@@ -359,30 +328,6 @@ where
                 );
             }
 
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-    */
-
-    /*
-    /// Respond to a key-value store state change for the given peer.
-    /// This is triggered when a new message is appended to the local feed.
-    /// Remove the peer from the list of active streams, send the requested
-    /// messages from the local feed to the peer and then reinsert the public
-    /// key of the peer to the list of active streams.
-    async fn recv_storageevent_idchanged(
-        &mut self,
-        api: &mut ApiCaller<W>,
-        id: &str,
-    ) -> Result<bool> {
-        // Attempt to remove the peer from the list of active streams.
-        if let Some(mut req) = self.reqs.remove(id) {
-            // Send local messages to the peer.
-            self.send_history(api, &mut req).await?;
-            // Reinsert the peer into the list of active streams.
-            self.reqs.insert(id.to_string(), req);
             Ok(true)
         } else {
             Ok(false)

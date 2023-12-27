@@ -34,7 +34,8 @@ use crate::{
     broker::{ActorEndpoint, BrokerEvent, BrokerMessage, Destination, BROKER},
     config::PEERS_TO_REPLICATE,
     node::{BLOB_STORE, KV_STORE},
-    Result,
+    storage::kv::StoreKvEvent,
+    Error, Result,
 };
 
 /// EBT replication events.
@@ -89,6 +90,9 @@ pub struct EbtManager {
     _requested_feeds: HashSet<SsbId>,
     /// Duration to wait for a connected peer to initiate an EBT session.
     session_wait_timeout: u64,
+    /// The sequence number of the latest message sent to each peer
+    /// for each requested feed.
+    sent_messages: HashMap<SsbId, HashMap<SsbId, u64>>,
 }
 
 impl Default for EbtManager {
@@ -102,6 +106,7 @@ impl Default for EbtManager {
             peer_clocks: HashMap::new(),
             _requested_feeds: HashSet::new(),
             session_wait_timeout: 5,
+            sent_messages: HashMap::new(),
         }
     }
 }
@@ -209,13 +214,17 @@ impl EbtManager {
         for (feed_id, encoded_seq_no) in clock.iter() {
             if *encoded_seq_no != -1 {
                 // Decode the encoded vector clock sequence number.
-                // TODO: Match properly on the values of replicate_flag and receive_flag.
-                let (_replicate_flag, _receive_flag, sequence) = clock::decode(*encoded_seq_no)?;
-                if let Some(last_seq) = KV_STORE.read().await.get_latest_seq(feed_id)? {
-                    if let Some(seq) = sequence {
-                        for n in seq..(last_seq + 1) {
-                            if let Some(msg_kvt) = KV_STORE.read().await.get_msg_kvt(feed_id, n)? {
-                                messages_to_be_sent.push(msg_kvt.value)
+                let (_replicate_flag, receive_flag, sequence) = clock::decode(*encoded_seq_no)?;
+                // Only send messages if the receive flag is true.
+                if let Some(true) = receive_flag {
+                    if let Some(last_seq) = KV_STORE.read().await.get_latest_seq(feed_id)? {
+                        if let Some(seq) = sequence {
+                            for n in seq..(last_seq + 1) {
+                                if let Some(msg_kvt) =
+                                    KV_STORE.read().await.get_msg_kvt(feed_id, n)?
+                                {
+                                    messages_to_be_sent.push(msg_kvt.value)
+                                }
                             }
                         }
                     }
@@ -335,6 +344,31 @@ impl EbtManager {
                     BrokerMessage::Ebt(EbtEvent::SendMessage(req_no, peer_ssb_id.to_owned(), msg)),
                 ))
                 .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_send_message(&mut self, peer_ssb_id: SsbId, msg: Value) -> Result<()> {
+        // Update the hashmap of sent messages.
+        //
+        // For each peer, keep a list of feed ID's and the sequence of the
+        // latest sent message for each. This is useful to consult when a new
+        // message is appended to the local store and may need to be sent to
+        // peers with whom we have an active EBT session.
+
+        let msg_author = msg["author"]
+            .as_str()
+            .ok_or(Error::OptionIsNone)?
+            .to_string();
+        let msg_sequence = msg["sequence"].as_u64().ok_or(Error::OptionIsNone)?;
+
+        if let Some(feeds) = self.sent_messages.get_mut(&peer_ssb_id) {
+            feeds.insert(msg_author, msg_sequence);
+        } else {
+            let mut feeds = HashMap::new();
+            feeds.insert(msg_author, msg_sequence);
+            self.sent_messages.insert(peer_ssb_id, feeds);
         }
 
         Ok(())
@@ -490,9 +524,11 @@ impl EbtManager {
                                     error!("Error while handling 'received message' event: {}", err)
                                 }
                             }
-                            EbtEvent::SendMessage(_req_no, _peer_ssb_id, _msg) => {
+                            EbtEvent::SendMessage(_req_no, peer_ssb_id, msg) => {
                                 trace!(target: "ebt-replication", "Sending message...");
-                                // TODO: Update sent messages.
+                                if let Err(err) = self.handle_send_message(peer_ssb_id, msg).await {
+                                    error!("Error while handling 'send message' event: {}", err)
+                                }
                             }
                             EbtEvent::SessionConcluded(connection_data) => {
                                 self.handle_session_concluded(connection_data).await;
@@ -508,6 +544,15 @@ impl EbtManager {
                                 }
                             }
                         }
+                    } else if let Some(BrokerMessage::StoreKv(StoreKvEvent(_ssb_id))) = msg {
+                        // Notification from the key-value store indicating that
+                        // a new message has just been appended to the feed
+                        // identified by `ssb_id`.
+                        debug!("Received KV store event from broker");
+                        todo!()
+                        // Respond to a key-value store state change for the given peer.
+                        // This is triggered when a new message is appended to the local feed.
+                        //self.handle_local_store_updated(ssb_id).await;
                     }
                 }
             }

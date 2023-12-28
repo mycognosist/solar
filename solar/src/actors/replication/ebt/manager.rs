@@ -72,7 +72,7 @@ impl Display for SessionRole {
 #[derive(Debug)]
 pub struct EbtManager {
     /// Active EBT peer sessions.
-    active_sessions: HashSet<SsbId>,
+    active_sessions: HashMap<SsbId, ReqNo>,
     /// Duration to wait before switching feed request to a different peer.
     _feed_wait_timeout: u64,
     /// The state of the replication loop.
@@ -98,7 +98,7 @@ pub struct EbtManager {
 impl Default for EbtManager {
     fn default() -> Self {
         EbtManager {
-            active_sessions: HashSet::new(),
+            active_sessions: HashMap::new(),
             _feed_wait_timeout: 3,
             _is_replication_loop_active: false,
             local_clock: HashMap::new(),
@@ -143,9 +143,9 @@ impl EbtManager {
     }
 
     /// Retrieve the vector clock for the given SSB ID.
-    fn _get_clock(self, peer_id: &SsbId) -> Option<VectorClock> {
+    fn get_clock(&self, peer_id: &SsbId) -> Option<VectorClock> {
         if peer_id == &self.local_id {
-            Some(self.local_clock)
+            Some(self.local_clock.to_owned())
         } else {
             self.peer_clocks.get(peer_id).cloned()
         }
@@ -157,6 +157,37 @@ impl EbtManager {
             self.local_clock = clock
         } else {
             self.peer_clocks.insert(peer_id.to_owned(), clock);
+        }
+    }
+
+    /// Retrieve the stored vector clock for the first peer, check for the
+    /// second peer in the vector clock and return the value of the receive
+    /// flag.
+    fn is_receiving(&self, peer_ssb_id: SsbId, ssb_id: SsbId) -> Result<bool> {
+        // Retrieve the vector clock for the first peer.
+        if let Some(clock) = self.get_clock(&peer_ssb_id) {
+            // Check if the second peer is represented in the vector clock.
+            if let Some(encoded_seq_no) = clock.get(&ssb_id) {
+                // Check if the receive flag is true.
+                if let (_replicate_flag, Some(true), _seq) = clock::decode(*encoded_seq_no)? {
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Get the sequence number of the latest message sent to the given
+    /// peer SSB ID for the feed represented by the given SSB ID.
+    fn _get_latest_sent_seq(self, peer_ssb_id: &SsbId, ssb_id: &SsbId) -> Option<u64> {
+        // Get the state of the messages sent to `peer_ssb_id`.
+        if let Some(sent_state) = self.sent_messages.get(peer_ssb_id) {
+            // Get the sequence number of the latest message sent for feed
+            // `ssb_id`.
+            sent_state.get(ssb_id).copied()
+        } else {
+            None
         }
     }
 
@@ -179,10 +210,10 @@ impl EbtManager {
     }
 
     /// Register a new EBT session for the given peer.
-    fn register_session(&mut self, peer_ssb_id: &SsbId) {
-        self.active_sessions.insert(peer_ssb_id.to_owned());
+    fn register_session(&mut self, peer_ssb_id: &SsbId, req_no: ReqNo) {
+        self.active_sessions.insert(peer_ssb_id.to_owned(), req_no);
 
-        trace!(target: "ebt-session", "Registered new EBT session for {}", peer_ssb_id);
+        trace!(target: "ebt-session", "Registered new EBT session {} for {}", req_no, peer_ssb_id);
     }
 
     /// Remove the given peer from the list of active session.
@@ -201,34 +232,63 @@ impl EbtManager {
         self._requested_feeds.insert(peer_id.to_owned());
     }
 
+    /// Decode the encoded sequence number from a vector clock and push
+    /// the latest desired messages to the given vector of messages.
+    ///
+    /// This method will only push messages to the vector if the replicate
+    /// flag is set to `true`.
+    async fn retrieve_latest_messages(
+        encoded_seq_no: i64,
+        feed_id: &SsbId,
+        messages: &mut Vec<Value>,
+    ) -> Result<()> {
+        if encoded_seq_no != -1 {
+            if let (_replicate_flag, Some(true), Some(seq)) = clock::decode(encoded_seq_no)? {
+                if let Some(last_seq) = KV_STORE.read().await.get_latest_seq(feed_id)? {
+                    for n in seq..(last_seq + 1) {
+                        if let Some(msg_kvt) = KV_STORE.read().await.get_msg_kvt(feed_id, n)? {
+                            messages.push(msg_kvt.value)
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Decode a peer's vector clock and retrieve all requested messages.
+    ///
+    /// If an SSB ID is supplied, retrieve only the lastest requested
+    /// messages authored by that ID.
+    ///
+    /// If no SSB ID is supplied, retrieve the latest requested messages
+    /// for all authors listed in the vector clock.
     async fn retrieve_requested_messages(
-        // TODO: Do we need these two parameters?
-        _req_no: &ReqNo,
-        _peer_ssb_id: &SsbId,
+        peer_ssb_id: Option<&SsbId>,
         clock: VectorClock,
     ) -> Result<Vec<Value>> {
         let mut messages_to_be_sent = Vec::new();
 
-        // Iterate over all key-value pairs in the vector clock.
-        for (feed_id, encoded_seq_no) in clock.iter() {
-            if *encoded_seq_no != -1 {
-                // Decode the encoded vector clock sequence number.
-                let (_replicate_flag, receive_flag, sequence) = clock::decode(*encoded_seq_no)?;
-                // Only send messages if the receive flag is true.
-                if let Some(true) = receive_flag {
-                    if let Some(last_seq) = KV_STORE.read().await.get_latest_seq(feed_id)? {
-                        if let Some(seq) = sequence {
-                            for n in seq..(last_seq + 1) {
-                                if let Some(msg_kvt) =
-                                    KV_STORE.read().await.get_msg_kvt(feed_id, n)?
-                                {
-                                    messages_to_be_sent.push(msg_kvt.value)
-                                }
-                            }
-                        }
-                    }
-                }
+        // We only want to retrieve messages authored by `peer_ssb_id`.
+        if let Some(feed_id) = peer_ssb_id {
+            if let Some(encoded_seq_no) = clock.get(feed_id) {
+                EbtManager::retrieve_latest_messages(
+                    *encoded_seq_no,
+                    feed_id,
+                    &mut messages_to_be_sent,
+                )
+                .await?;
+            }
+        } else {
+            // We want to retrieve messages for all feeds in the vector clock.
+            for (feed_id, encoded_seq_no) in clock.iter() {
+                EbtManager::retrieve_latest_messages(
+                    *encoded_seq_no,
+                    feed_id,
+                    &mut messages_to_be_sent,
+                )
+                .await?;
             }
         }
 
@@ -256,7 +316,7 @@ impl EbtManager {
 
             // Only proceed with session initiation if there
             // is no currently active session with the given peer.
-            if !self.active_sessions.contains(&peer_ssb_id) {
+            if !self.active_sessions.contains_key(&peer_ssb_id) {
                 trace!(
                     target: "ebt",
                     "Requesting an EBT session with {:?}",
@@ -281,7 +341,7 @@ impl EbtManager {
     ) -> Result<()> {
         trace!(target: "ebt-replication", "Initiated EBT session with {} as {}", peer_ssb_id, session_role);
 
-        self.register_session(&peer_ssb_id);
+        self.register_session(&peer_ssb_id, req_no);
         let local_clock = self.local_clock.to_owned();
 
         match session_role {
@@ -321,7 +381,7 @@ impl EbtManager {
         // assumed that the clock was sent in response to a locally-sent
         // EBT replicate request. Ie. The session was requested by the
         // local peer.
-        if !self.active_sessions.contains(&peer_ssb_id) {
+        if !self.active_sessions.contains_key(&peer_ssb_id) {
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
@@ -336,7 +396,9 @@ impl EbtManager {
 
         self.set_clock(&peer_ssb_id, clock.to_owned());
 
-        let msgs = EbtManager::retrieve_requested_messages(&req_no, &peer_ssb_id, clock).await?;
+        // We want messages for all feeds in the clock, therefore the
+        // `peer_ssb_id` parameter is set to `None`.
+        let msgs = EbtManager::retrieve_requested_messages(None, clock).await?;
         for msg in msgs {
             ch_broker
                 .send(BrokerEvent::new(
@@ -418,6 +480,31 @@ impl EbtManager {
                 last_seq
             );
         }
+        Ok(())
+    }
+
+    async fn handle_local_store_updated(&self, ssb_id: SsbId, msg: Value) -> Result<()> {
+        // Create channel to send messages to broker.
+        let mut ch_broker = BROKER.lock().await.create_sender();
+
+        // Iterate over all active EBT sessions.
+        for (peer_ssb_id, req_no) in self.active_sessions.iter() {
+            // If `ssb_id` appears in the vector clock of `peer_ssb_id` and
+            // the receive flag is set to `true`, send the message.
+            if self.is_receiving(peer_ssb_id.to_owned(), ssb_id.to_owned())? {
+                ch_broker
+                    .send(BrokerEvent::new(
+                        Destination::Broadcast,
+                        BrokerMessage::Ebt(EbtEvent::SendMessage(
+                            *req_no,
+                            peer_ssb_id.to_owned(),
+                            msg.to_owned(),
+                        )),
+                    ))
+                    .await?;
+            }
+        }
+
         Ok(())
     }
 
@@ -544,15 +631,14 @@ impl EbtManager {
                                 }
                             }
                         }
-                    } else if let Some(BrokerMessage::StoreKv(StoreKvEvent(_ssb_id))) = msg {
-                        // Notification from the key-value store indicating that
-                        // a new message has just been appended to the feed
-                        // identified by `ssb_id`.
+                    } else if let Some(BrokerMessage::StoreKv(StoreKvEvent((ssb_id, msg)))) = msg {
                         debug!("Received KV store event from broker");
-                        todo!()
+
                         // Respond to a key-value store state change for the given peer.
                         // This is triggered when a new message is appended to the local feed.
-                        //self.handle_local_store_updated(ssb_id).await;
+                        if let Err(err) = self.handle_local_store_updated(ssb_id, msg).await {
+                            error!("Error while handling 'local store updated' event: {}", err)
+                        }
                     }
                 }
             }

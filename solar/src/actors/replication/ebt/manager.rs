@@ -484,6 +484,15 @@ impl EbtManager {
     }
 
     async fn handle_local_store_updated(&self, ssb_id: SsbId, msg: Value) -> Result<()> {
+        // TODO: Beware of a possible race condition in this implementation.
+        //
+        // We are not considering the sequence number of the last message sent
+        // to any active sessions for the given feed (ie. `ssb_id`).
+        //
+        // This means that we may inadvertently end up sending out-of-order
+        // messages if this message is sent before the rest of the requested
+        // feed history.
+
         // Create channel to send messages to broker.
         let mut ch_broker = BROKER.lock().await.create_sender();
 

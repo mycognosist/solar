@@ -2,7 +2,6 @@ use futures::SinkExt;
 use kuska_ssb::feed::{Feed as MessageKvt, Message as MessageValue};
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sled::{Config as DbConfig, Db};
 
 use crate::{
@@ -29,7 +28,7 @@ const PREFIX_PEER: u8 = 4u8;
 ///
 /// The JSON value of the appended message is included.
 #[derive(Debug, Clone)]
-pub struct StoreKvEvent(pub (String, Value));
+pub struct StoreKvEvent(pub String);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlobStatus {
@@ -288,7 +287,7 @@ impl KvStorage {
         // key has been updated.
         let broker_msg = BrokerEvent::new(
             Destination::Broadcast,
-            BrokerMessage::StoreKv(StoreKvEvent((author, msg_kvt.value))),
+            BrokerMessage::StoreKv(StoreKvEvent(author)),
         );
 
         // Matching on the error here (instead of unwrapping) allows us to

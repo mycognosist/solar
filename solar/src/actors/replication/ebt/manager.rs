@@ -207,8 +207,8 @@ impl EbtManager {
             self.local_clock.insert(peer_id.to_owned(), encoded_value);
         } else {
             // No messages are stored in the local database for this feed.
-            // Set replicate flag to `true`, receive to `false` and `seq` to 0.
-            let encoded_value: EncodedClockValue = clock::encode(true, Some(false), Some(0))?;
+            // Set replicate flag to `true`, receive to `true` and `seq` to 0.
+            let encoded_value: EncodedClockValue = clock::encode(true, Some(true), Some(0))?;
             self.local_clock.insert(peer_id.to_owned(), encoded_value);
         }
 
@@ -252,7 +252,7 @@ impl EbtManager {
         if encoded_seq_no != -1 {
             if let (_replicate_flag, Some(true), Some(seq)) = clock::decode(encoded_seq_no)? {
                 if let Some(last_seq) = KV_STORE.read().await.get_latest_seq(feed_id)? {
-                    for n in seq..(last_seq + 1) {
+                    for n in (seq + 1)..=last_seq {
                         if let Some(msg_kvt) = KV_STORE.read().await.get_msg_kvt(feed_id, n)? {
                             messages.push(msg_kvt.value)
                         }

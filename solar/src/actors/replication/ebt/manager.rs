@@ -72,7 +72,7 @@ impl Display for SessionRole {
 #[derive(Debug)]
 pub struct EbtManager {
     /// Active EBT peer sessions.
-    active_sessions: HashMap<SsbId, ReqNo>,
+    active_sessions: HashMap<SsbId, (ReqNo, SessionRole)>,
     /// Duration to wait before switching feed request to a different peer.
     _feed_wait_timeout: u64,
     /// The state of the replication loop.
@@ -90,6 +90,11 @@ pub struct EbtManager {
     _requested_feeds: HashSet<SsbId>,
     /// Duration to wait for a connected peer to initiate an EBT session.
     session_wait_timeout: u64,
+    /// The latest vector clock sent for each session, identified by the
+    /// request number.
+    //
+    // TODO: Do we want to remove each entry when the session concludes?
+    sent_clocks: HashMap<ReqNo, VectorClock>,
     /// The sequence number of the latest message sent to each peer
     /// for each requested feed.
     sent_messages: HashMap<SsbId, HashMap<SsbId, u64>>,
@@ -106,6 +111,7 @@ impl Default for EbtManager {
             peer_clocks: HashMap::new(),
             _requested_feeds: HashSet::new(),
             session_wait_timeout: 5,
+            sent_clocks: HashMap::new(),
             sent_messages: HashMap::new(),
         }
     }
@@ -210,8 +216,9 @@ impl EbtManager {
     }
 
     /// Register a new EBT session for the given peer.
-    fn register_session(&mut self, peer_ssb_id: &SsbId, req_no: ReqNo) {
-        self.active_sessions.insert(peer_ssb_id.to_owned(), req_no);
+    fn register_session(&mut self, peer_ssb_id: &SsbId, req_no: ReqNo, session_role: SessionRole) {
+        self.active_sessions
+            .insert(peer_ssb_id.to_owned(), (req_no, session_role));
 
         trace!(target: "ebt-session", "Registered new EBT session {} for {}", req_no, peer_ssb_id);
     }
@@ -341,7 +348,7 @@ impl EbtManager {
     ) -> Result<()> {
         trace!(target: "ebt-replication", "Initiated EBT session with {} as {}", peer_ssb_id, session_role);
 
-        self.register_session(&peer_ssb_id, req_no);
+        self.register_session(&peer_ssb_id, req_no, session_role.to_owned());
         let local_clock = self.local_clock.to_owned();
 
         match session_role {
@@ -365,6 +372,10 @@ impl EbtManager {
         Ok(())
     }
 
+    fn handle_send_clock(&mut self, req_no: ReqNo, clock: VectorClock) -> Option<VectorClock> {
+        self.sent_clocks.insert(req_no, clock)
+    }
+
     async fn handle_received_clock(
         &mut self,
         req_no: ReqNo,
@@ -372,6 +383,9 @@ impl EbtManager {
         clock: VectorClock,
     ) -> Result<()> {
         trace!(target: "ebt-replication", "Received vector clock: {:?}", clock);
+
+        // Update the stored vector clock for the remote peer.
+        self.set_clock(&peer_ssb_id, clock.to_owned());
 
         // Create channel to send messages to broker.
         let mut ch_broker = BROKER.lock().await.create_sender();
@@ -392,9 +406,14 @@ impl EbtManager {
                     )),
                 ))
                 .await?;
+        }
 
+        // If we have not previously sent a clock, send one now.
+        //
+        // This indicates that the local peer is acting as the session
+        // requester.
+        if self.sent_clocks.get(&req_no).is_none() {
             let local_clock = self.local_clock.to_owned();
-
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
@@ -402,8 +421,6 @@ impl EbtManager {
                 ))
                 .await?;
         }
-
-        self.set_clock(&peer_ssb_id, clock.to_owned());
 
         // We want messages for all feeds in the clock, therefore the
         // `peer_ssb_id` parameter is set to `None`.
@@ -497,7 +514,7 @@ impl EbtManager {
     /// peers.
     async fn handle_local_store_updated(&self, ssb_id: SsbId) -> Result<()> {
         // Iterate over all active EBT sessions.
-        for (_peer_ssb_id, req_no) in self.active_sessions.iter() {
+        for (_peer_ssb_id, (req_no, _session_role)) in self.active_sessions.iter() {
             // Look up the latest sequence for the given ID.
             if let Some(seq) = KV_STORE.read().await.get_latest_seq(&ssb_id)? {
                 // Encode the replicate flag, receive flag and sequence.
@@ -617,9 +634,9 @@ impl EbtManager {
                                     error!("Error while handling 'session initiated' event: {}", err)
                                 }
                             }
-                            EbtEvent::SendClock(_, clock) => {
+                            EbtEvent::SendClock(req_no, clock) => {
                                 trace!(target: "ebt-replication", "Sending vector clock: {:?}", clock);
-                                // TODO: Update sent clocks.
+                                let _ = self.handle_send_clock(req_no, clock);
                             }
                             EbtEvent::ReceivedClock(req_no, peer_ssb_id, clock) => {
                                 if let Err(err) = self.handle_received_clock(req_no, peer_ssb_id, clock).await {
@@ -632,7 +649,7 @@ impl EbtManager {
                                 }
                             }
                             EbtEvent::SendMessage(_req_no, peer_ssb_id, msg) => {
-                                trace!(target: "ebt-replication", "Sending message...");
+                                trace!(target: "ebt-replication", "Sending message: {:?}...", msg);
                                 if let Err(err) = self.handle_send_message(peer_ssb_id, msg).await {
                                     error!("Error while handling 'send message' event: {}", err)
                                 }

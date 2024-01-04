@@ -47,7 +47,7 @@ where
         peer_ssb_id: String,
         active_request: Option<ReqNo>,
     ) -> Result<bool> {
-        trace!(target: "ebt-handler", "Received MUXRPC input: {:?}", op);
+        trace!(target: "muxrpc-ebt-handler", "Received MUXRPC input: {:?}", op);
 
         // An outbound EBT replicate request was made before the handler was
         // called; add it to the map of active requests.

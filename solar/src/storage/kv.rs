@@ -25,6 +25,8 @@ const PREFIX_PEER: u8 = 4u8;
 
 /// The feed belonging to the given SSB ID has changed
 /// (ie. a new message has been appended to the feed).
+///
+/// The JSON value of the appended message is included.
 #[derive(Debug, Clone)]
 pub struct StoreKvEvent(pub String);
 

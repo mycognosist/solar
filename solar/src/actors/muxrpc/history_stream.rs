@@ -85,11 +85,11 @@ where
                 self.recv_error_response(api, *req_no, err).await
             }
             // Handle a broker message.
-            RpcInput::Message(BrokerMessage::StoreKv(StoreKvEvent(id))) => {
+            RpcInput::Message(BrokerMessage::StoreKv(StoreKvEvent(ssb_id))) => {
                 // Notification from the key-value store indicating that
                 // a new message has just been appended to the feed
-                // identified by `id`.
-                return self.recv_storageevent_idchanged(api, id).await;
+                // identified by `ssb_id`.
+                return self.recv_storageevent_idchanged(api, ssb_id).await;
             }
             // Handle a timer event.
             RpcInput::Timer => self.on_timer(api).await,
@@ -315,14 +315,14 @@ where
     async fn recv_storageevent_idchanged(
         &mut self,
         api: &mut ApiCaller<W>,
-        id: &str,
+        ssb_id: &str,
     ) -> Result<bool> {
         // Attempt to remove the peer from the list of active streams.
-        if let Some(mut req) = self.reqs.remove(id) {
+        if let Some(mut req) = self.reqs.remove(ssb_id) {
             // Send local messages to the peer.
             self.send_history(api, &mut req).await?;
             // Reinsert the peer into the list of active streams.
-            self.reqs.insert(id.to_string(), req);
+            self.reqs.insert(ssb_id.to_string(), req);
             Ok(true)
         } else {
             Ok(false)

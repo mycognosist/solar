@@ -10,6 +10,8 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::Display,
+    fs,
+    path::PathBuf,
 };
 
 use async_std::task;
@@ -120,8 +122,6 @@ impl Default for EbtManager {
 impl EbtManager {
     // Read peer clock state from file.
     // fn load_peer_clocks()
-    // Write peer clock state to file.
-    // fn persist_peer_clocks()
 
     /// Initialise the local clock based on peers to be replicated.
     ///
@@ -164,6 +164,25 @@ impl EbtManager {
         } else {
             self.peer_clocks.insert(ssb_id.to_owned(), clock);
         }
+    }
+
+    /// Persist all peer clocks to disk (`ebt` directory).
+    fn persist_peer_clocks(&self, ebt_config_path: PathBuf) -> Result<()> {
+        for (ssb_id, clock) in self.peer_clocks.iter() {
+            // Format ID as: @<PUBLIC_KEY>.ed25519, replacing an `/` characters
+            // with `-`.
+            let clock_author_id =
+                format!("@{}", ssb_id.to_string().replace('/', "-").replace('=', ""));
+
+            let clock_filepath = ebt_config_path.join(clock_author_id);
+            let json_clock = serde_json::to_string(clock)?;
+
+            fs::write(clock_filepath, json_clock)?;
+
+            debug!("Wrote vector clock to file for: {}", ssb_id);
+        }
+
+        Ok(())
     }
 
     /// Retrieve the stored vector clock for the first peer, check for the
@@ -594,7 +613,7 @@ impl EbtManager {
     ///
     /// Listen for EBT event messages via the broker and update EBT session
     /// state accordingly.
-    pub async fn event_loop(mut self, local_id: SsbId) -> Result<()> {
+    pub async fn event_loop(mut self, local_id: SsbId, ebt_config_path: PathBuf) -> Result<()> {
         debug!("Started EBT event loop");
 
         // Set the ID (@-prefixed public key) of the local node.
@@ -680,6 +699,9 @@ impl EbtManager {
                 }
             }
         }
+
+        // Write all peer clocks to disk before exiting.
+        self.persist_peer_clocks(ebt_config_path)?;
 
         Ok(())
     }

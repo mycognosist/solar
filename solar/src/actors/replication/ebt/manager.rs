@@ -10,7 +10,8 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::Display,
-    fs,
+    fs::{self, File},
+    io::Read,
     path::PathBuf,
 };
 
@@ -120,14 +121,11 @@ impl Default for EbtManager {
 }
 
 impl EbtManager {
-    // Read peer clock state from file.
-    // fn load_peer_clocks()
-
     /// Initialise the local clock based on peers to be replicated.
     ///
     /// This defines the public keys of all feeds we wish to replicate,
     /// along with the latest sequence number for each.
-    async fn init_local_clock(&mut self) -> Result<()> {
+    async fn init_local_clock(&mut self, ebt_config_path: &PathBuf) -> Result<()> {
         debug!("Initialising local EBT clock");
 
         let local_id = self.local_id.to_owned();
@@ -143,7 +141,8 @@ impl EbtManager {
             }
         }
 
-        // TODO: Load peer clocks from file and update `peer_clocks`.
+        // Load peer clocks from file and update `peer_clocks`.
+        self.load_peer_clocks(ebt_config_path)?;
 
         Ok(())
     }
@@ -166,11 +165,50 @@ impl EbtManager {
         }
     }
 
+    /// Load all peer clocks from disk (`ebt` directory).
+    fn load_peer_clocks(&mut self, ebt_config_path: &PathBuf) -> Result<()> {
+        // Iterate over all stored vector clocks in the directory.
+        if let Ok(entries) = fs::read_dir(ebt_config_path) {
+            for clock_entry in entries.flatten() {
+                // Get the SSB ID of the vector clock from the filename.
+                let clock_filename = clock_entry.file_name();
+                let ssb_id = clock_filename.into_string().map_err(|os_string| {
+                    Error::Other(format!(
+                        "Invalid unicode in EBT clock filename: {:?}",
+                        os_string
+                    ))
+                })?;
+
+                // Format the SSB ID as: <PUBLIC_KEY>=.ed25519, replacing
+                // any `-` characters with `/`.
+                //
+                // TODO: Rewrite this to avoid extra allocations.
+                let mut ssb_id = ssb_id.replace('@', "").replace('-', "/");
+                if let Some(dot_index) = ssb_id.find('.') {
+                    ssb_id.insert(dot_index, '=')
+                }
+
+                // Read and parse the vector clock from the file.
+                let mut clock_file = File::open(&clock_entry.path())?;
+                let mut clock_file_contents = String::new();
+                clock_file.read_to_string(&mut clock_file_contents)?;
+                let clock: VectorClock = serde_json::from_str(&clock_file_contents)?;
+
+                // Set the vector clock in memory.
+                self.set_clock(&ssb_id, clock);
+
+                debug!("Loaded vector clock from file for: {}", ssb_id)
+            }
+        }
+
+        Ok(())
+    }
+
     /// Persist all peer clocks to disk (`ebt` directory).
     fn persist_peer_clocks(&self, ebt_config_path: PathBuf) -> Result<()> {
         for (ssb_id, clock) in self.peer_clocks.iter() {
-            // Format ID as: @<PUBLIC_KEY>.ed25519, replacing an `/` characters
-            // with `-`.
+            // Format the SSB ID as: @<PUBLIC_KEY>.ed25519, replacing any `/`
+            // characters with `-`.
             let clock_author_id =
                 format!("@{}", ssb_id.to_string().replace('/', "-").replace('=', ""));
 
@@ -620,7 +658,7 @@ impl EbtManager {
         self.local_id = local_id;
 
         // Initialise the local clock based on peers to be replicated.
-        self.init_local_clock().await?;
+        self.init_local_clock(&ebt_config_path).await?;
 
         // Register the EBT event loop actor with the broker.
         let ActorEndpoint {

@@ -53,26 +53,29 @@ impl ApplicationConfig {
     /// Create the root data directory for solar, along with the feed and blob
     /// directories. This is where all application data is stored, including
     /// the public-private keypair, key-value database and blob store.
-    fn create_data_directories(path: Option<PathBuf>) -> Result<(PathBuf, PathBuf)> {
+    fn create_data_directories(path: Option<PathBuf>) -> Result<(PathBuf, PathBuf, PathBuf)> {
         let base_path = path.unwrap_or(BaseDirectories::new()?.create_data_directory("solar")?);
 
         // Define the directory name for the feed store.
         let feeds_path = base_path.join("feeds");
         // Define the directory name for the blob store.
         let blobs_path = base_path.join("blobs");
+        // Define the directory name for the EBT vector clocks.
+        let ebt_path = base_path.join("ebt");
 
-        // Create the feed and blobs directories.
+        // Create the feed, blobs and ebt directories.
         std::fs::create_dir_all(&feeds_path)?;
         std::fs::create_dir_all(blobs_path)?;
+        std::fs::create_dir_all(&ebt_path)?;
 
-        Ok((base_path, feeds_path))
+        Ok((base_path, feeds_path, ebt_path))
     }
 
     /// Configure the application based on CLI options, environment variables
     /// and defaults.
     pub fn new(path: Option<PathBuf>) -> Result<Self> {
         // Create the application data directories if they don't already exist.
-        let (base_path, feeds_path) = Self::create_data_directories(path)?;
+        let (base_path, feeds_path, _ebt_path) = Self::create_data_directories(path)?;
 
         info!("Base directory is {:?}", base_path);
 

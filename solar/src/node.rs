@@ -43,6 +43,7 @@ impl Node {
         // Define the directory name for the blob store.
         let blobs_path = config
             .base_path
+            .as_ref()
             .expect("Base path not supplied")
             .join("blobs");
 
@@ -136,11 +137,18 @@ impl Node {
         // intervals).
         Broker::spawn(connection_scheduler::actor(peers_to_dial));
 
+        // Define the directory name for the ebt clock store.
+        let ebt_path = config
+            .base_path
+            .expect("Base path not supplied")
+            .join("ebt");
+
         // Spawn the EBT replication manager actor.
         let ebt_replication_manager = EbtManager::default();
         Broker::spawn(EbtManager::event_loop(
             ebt_replication_manager,
             owned_identity.id,
+            ebt_path,
         ));
 
         // Spawn the connection manager message loop.

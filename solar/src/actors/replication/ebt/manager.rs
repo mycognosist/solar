@@ -366,10 +366,9 @@ impl EbtManager {
     async fn handle_wait_for_session_request(&self, connection_data: ConnectionData) {
         trace!(target: "ebt", "Waiting for EBT session request");
 
-        let session_role = SessionRole::Responder;
         task::spawn(replicator::run(
             connection_data,
-            session_role,
+            SessionRole::Responder,
             self.session_wait_timeout,
         ));
     }
@@ -387,10 +386,9 @@ impl EbtManager {
                     connection_data.peer_public_key.unwrap()
                 );
 
-                let session_role = SessionRole::Requester;
                 task::spawn(replicator::run(
                     connection_data,
-                    session_role,
+                    SessionRole::Requester,
                     self.session_wait_timeout,
                 ));
             }

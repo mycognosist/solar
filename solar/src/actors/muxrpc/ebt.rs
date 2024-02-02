@@ -46,6 +46,7 @@ where
         ch_broker: &mut ChBrokerSend,
         peer_ssb_id: String,
         active_request: Option<ReqNo>,
+        connection_id: usize,
     ) -> Result<bool> {
         trace!(target: "muxrpc-ebt-handler", "Received MUXRPC input: {:?}", op);
 
@@ -62,7 +63,8 @@ where
             RpcInput::Network(req_no, rpc::RecvMsg::RpcRequest(req)) => {
                 match ApiMethod::from_rpc_body(req) {
                     Some(ApiMethod::EbtReplicate) => {
-                        self.recv_ebtreplicate(api, *req_no, req, peer_ssb_id).await
+                        self.recv_ebtreplicate(api, *req_no, req, peer_ssb_id, connection_id)
+                            .await
                     }
                     _ => Ok(false),
                 }
@@ -76,6 +78,7 @@ where
                         .send(BrokerEvent::new(
                             Destination::Broadcast,
                             BrokerMessage::Ebt(EbtEvent::ReceivedClock(
+                                connection_id,
                                 *req_no,
                                 peer_ssb_id,
                                 clock,
@@ -88,7 +91,7 @@ where
             }
             // Handle an incoming MUXRPC response.
             RpcInput::Network(req_no, rpc::RecvMsg::RpcResponse(_type, res)) => {
-                self.recv_rpc_response(ch_broker, *req_no, res, peer_ssb_id)
+                self.recv_rpc_response(ch_broker, *req_no, res, peer_ssb_id, connection_id)
                     .await
             }
             // Handle an incoming MUXRPC 'cancel stream' response.
@@ -101,20 +104,43 @@ where
             }
             // Handle a broker message.
             RpcInput::Message(msg) => match msg {
-                BrokerMessage::Ebt(EbtEvent::SendClock(req_no, clock)) => {
-                    // Serialize the vector clock as a JSON string.
-                    let json_clock = serde_json::to_string(&clock)?;
-                    // The request number must be negative (response).
-                    api.ebt_clock_res_send(-(*req_no), &json_clock).await?;
+                BrokerMessage::Ebt(EbtEvent::SendClock(conn_id, req_no, clock)) => {
+                    // Only send the clock if the associated connection is
+                    // being handled by this instance of the handler.
+                    //
+                    // This prevents the clock being sent to every peer with
+                    // whom we have an active session and matching request
+                    // number.
+                    if *conn_id == connection_id {
+                        // Serialize the vector clock as a JSON string.
+                        let json_clock = serde_json::to_string(&clock)?;
+                        // The request number must be negative (response).
+                        api.ebt_clock_res_send(-(*req_no), &json_clock).await?;
+
+                        trace!(target: "ebt", "Sent clock to connection {} with request number {}", conn_id, req_no);
+                    }
 
                     Ok(false)
                 }
-                BrokerMessage::Ebt(EbtEvent::SendMessage(req_no, ssb_id, msg)) => {
-                    // Ensure the message is sent to the correct peer.
-                    if peer_ssb_id == *ssb_id {
-                        let json_msg = msg.to_string();
-                        // The request number must be negative (response).
-                        api.ebt_feed_res_send(-(*req_no), &json_msg).await?;
+                BrokerMessage::Ebt(EbtEvent::SendMessage(conn_id, req_no, ssb_id, msg)) => {
+                    // Only send the message if the associated connection is
+                    // being handled by this instance of the handler.
+                    //
+                    // This prevents the message being sent to every peer with
+                    // whom we have an active session and matching request
+                    // number.
+                    if *conn_id == connection_id {
+                        // TODO: Remove this check; made redundant by the
+                        // connection ID check.
+                        //
+                        // Ensure the message is sent to the correct peer.
+                        if peer_ssb_id == *ssb_id {
+                            let json_msg = msg.to_string();
+                            // The request number must be negative (response).
+                            api.ebt_feed_res_send(-(*req_no), &json_msg).await?;
+
+                            trace!(target: "ebt", "Sent message to {} on connection {}", ssb_id, conn_id);
+                        }
                     }
 
                     Ok(false)
@@ -145,6 +171,7 @@ where
         req_no: ReqNo,
         req: &rpc::Body,
         peer_ssb_id: String,
+        connection_id: usize,
     ) -> Result<bool> {
         // Deserialize the args from an incoming EBT replicate request.
         let mut args: Vec<dto::EbtReplicate> = serde_json::from_value(req.args.clone())?;
@@ -180,6 +207,7 @@ where
             .send(BrokerEvent::new(
                 Destination::Broadcast,
                 BrokerMessage::Ebt(EbtEvent::SessionInitiated(
+                    connection_id,
                     req_no,
                     peer_ssb_id,
                     SessionRole::Responder,
@@ -198,6 +226,7 @@ where
         req_no: ReqNo,
         res: &[u8],
         peer_ssb_id: String,
+        connection_id: usize,
     ) -> Result<bool> {
         trace!(target: "ebt-handler", "Received RPC response: {}", req_no);
 
@@ -214,7 +243,12 @@ where
                 ch_broker
                     .send(BrokerEvent::new(
                         Destination::Broadcast,
-                        BrokerMessage::Ebt(EbtEvent::ReceivedClock(req_no, peer_ssb_id, clock)),
+                        BrokerMessage::Ebt(EbtEvent::ReceivedClock(
+                            connection_id,
+                            req_no,
+                            peer_ssb_id,
+                            clock,
+                        )),
                     ))
                     .await?;
             } else {
@@ -243,11 +277,13 @@ where
         Ok(false)
     }
 
-    /// Close the stream and remove the associated request from the map of
-    /// active requests.
+    /// Remove the associated request from the map of active requests and close
+    /// the stream.
     async fn recv_cancelstream(&mut self, api: &mut ApiCaller<W>, req_no: ReqNo) -> Result<bool> {
-        api.rpc().send_stream_eof(-req_no).await?;
+        trace!(target: "ebt-handler", "Received cancel stream RPC response: {}", req_no);
+
         self.active_requests.remove(&req_no);
+        api.rpc().send_stream_eof(-req_no).await?;
 
         Ok(true)
     }
@@ -261,78 +297,4 @@ where
 
         Err(Error::EbtReplicate((req_no, err_msg.to_string())))
     }
-
-    /*
-    /// Process an incoming MUXRPC response. The response is expected to
-    /// contain an SSB message.
-    async fn recv_rpc_response(
-        &mut self,
-        _api: &mut ApiCaller<W>,
-        ch_broker: &mut ChBrokerSend,
-        req_no: i32,
-        res: &[u8],
-    ) -> Result<bool> {
-        // Only handle the response if we made the request.
-        if self.peers.contains_key(&req_no) {
-            // First try to deserialize the response into a message value.
-            // If that fails, try to deserialize into a message KVT and then
-            // convert that into a message value. Return an error if that fails.
-            // This approach allows us to handle the unlikely event that
-            // messages are sent as KVTs and not simply values.
-            //
-            // Validation of the message signature and fields is also performed
-            // as part of the call to `from_slice`.
-            let msg = match Message::from_slice(res) {
-                Ok(msg) => msg,
-                Err(_) => MessageKvt::from_slice(res)?.into_message()?,
-            };
-
-            // Retrieve the sequence number of the most recent message for
-            // the peer that authored the received message.
-            let last_seq = KV_STORE
-                .read()
-                .await
-                .get_latest_seq(&msg.author().to_string())?
-                .unwrap_or(0);
-
-            // Validate the sequence number.
-            if msg.sequence() == last_seq + 1 {
-                // Append the message to the feed.
-                KV_STORE.write().await.append_feed(msg.clone()).await?;
-
-                info!(
-                    "received msg number {} from {}",
-                    msg.sequence(),
-                    msg.author()
-                );
-
-                // Extract blob references from the received message and
-                // request those blobs if they are not already in the local
-                // blobstore.
-                for key in self.extract_blob_refs(&msg) {
-                    if !BLOB_STORE.read().await.exists(&key) {
-                        let event = super::blobs_get::RpcBlobsGetEvent::Get(dto::BlobsGetIn {
-                            key,
-                            size: None,
-                            max: None,
-                        });
-                        let broker_msg = BrokerEvent::new(Destination::Broadcast, event);
-                        ch_broker.send(broker_msg).await.unwrap();
-                    }
-                }
-            } else {
-                warn!(
-                    "received out-of-order msg from {}; recv: {} db: {}",
-                    &msg.author().to_string(),
-                    msg.sequence(),
-                    last_seq
-                );
-            }
-
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-    */
 }

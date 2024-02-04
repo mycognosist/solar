@@ -83,6 +83,7 @@ pub async fn run(
     // received.
     let ebt_session_start = Instant::now();
 
+    // TODO: Could this be moved into the MUXRPC EBT handler?
     if let SessionRole::Requester = session_role {
         // Send EBT request.
         let ebt_args = EbtReplicate::default();
@@ -136,27 +137,6 @@ pub async fn run(
             Err(err) => {
                 error!("EBT replicate handler failed: {:?}", err);
 
-                /*
-                // TODO: This match is not exhaustive.
-                //
-                // We end up in a situation where the connection is not
-                // cleaned up (`ConnectionEvent::Disconnecting`) and the
-                // session is not removed.
-                if let Error::EbtReplicate((req_no, err_msg)) = err {
-                    ch_broker
-                        .send(BrokerEvent::new(
-                            Destination::Broadcast,
-                            BrokerMessage::Ebt(EbtEvent::Error(
-                                connection_data,
-                                req_no,
-                                peer_ssb_id.to_owned(),
-                                err_msg,
-                            )),
-                        ))
-                        .await?;
-                }
-                */
-
                 ch_broker
                     .send(BrokerEvent::new(
                         Destination::Broadcast,
@@ -200,6 +180,8 @@ pub async fn run(
         }
     }
 
+    // TODO: Consider including session role in SessionConcluded so that we can
+    // await another request if acting as the responder.
     ch_broker
         .send(BrokerEvent::new(
             Destination::Broadcast,

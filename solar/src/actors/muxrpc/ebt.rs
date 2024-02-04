@@ -104,7 +104,22 @@ where
             }
             // Handle a broker message.
             RpcInput::Message(msg) => match msg {
-                BrokerMessage::Ebt(EbtEvent::SendClock(conn_id, req_no, clock)) => {
+                BrokerMessage::Ebt(EbtEvent::SendClock(conn_id, req_no, clock, session_role)) => {
+                    // This is, regrettably, rather unintuitive.
+                    //
+                    // `api.ebt_clock_res_send()` internally calls
+                    // `send_response()` which applies the negative sign to the
+                    // given request number. However, the request number should
+                    // always be positive when we are acting as the requester -
+                    // even though we are sending a "response". This is why we
+                    // apply a negative here for the session requester: so that
+                    // the double negation results in a response with a
+                    // positive request number.
+                    let req_no = match session_role {
+                        SessionRole::Requester => -(*req_no),
+                        SessionRole::Responder => *req_no,
+                    };
+
                     // Only send the clock if the associated connection is
                     // being handled by this instance of the handler.
                     //
@@ -115,14 +130,31 @@ where
                         // Serialize the vector clock as a JSON string.
                         let json_clock = serde_json::to_string(&clock)?;
                         // The request number must be negative (response).
-                        api.ebt_clock_res_send(-(*req_no), &json_clock).await?;
+                        api.ebt_clock_res_send(req_no, &json_clock).await?;
 
-                        trace!(target: "ebt", "Sent clock to connection {} with request number {}", conn_id, req_no);
+                        trace!(target: "ebt", "Sent clock to connection {} with request number {} as {}", conn_id, req_no, session_role);
                     }
 
                     Ok(false)
                 }
-                BrokerMessage::Ebt(EbtEvent::SendMessage(conn_id, req_no, ssb_id, msg)) => {
+                BrokerMessage::Ebt(EbtEvent::SendMessage(
+                    conn_id,
+                    req_no,
+                    ssb_id,
+                    msg,
+                    session_role,
+                )) => {
+                    // Define the sign of the request number based on session
+                    // role (note: this is the opposite sign of the number
+                    // that will ultimately be sent.
+                    //
+                    // See the comment in the `SendClock` event above for
+                    // further explantation.
+                    let req_no = match session_role {
+                        SessionRole::Requester => -(*req_no),
+                        SessionRole::Responder => *req_no,
+                    };
+
                     // Only send the message if the associated connection is
                     // being handled by this instance of the handler.
                     //
@@ -136,8 +168,7 @@ where
                         // Ensure the message is sent to the correct peer.
                         if peer_ssb_id == *ssb_id {
                             let json_msg = msg.to_string();
-                            // The request number must be negative (response).
-                            api.ebt_feed_res_send(-(*req_no), &json_msg).await?;
+                            api.ebt_feed_res_send(req_no, &json_msg).await?;
 
                             trace!(target: "ebt", "Sent message to {} on connection {}", ssb_id, conn_id);
                         }

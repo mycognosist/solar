@@ -51,6 +51,8 @@ type ErrorMsg = String;
 pub enum EbtEvent {
     WaitForSessionRequest(ConnectionData),
     RequestSession(ConnectionData),
+    // TODO: See if we can remove `ReqNo` from all these events.
+    // Then `ReqNo` lives purely inside the MUXRPC EBT handler.
     SessionInitiated(ConnectionId, ReqNo, SsbId, SessionRole),
     SendClock(ConnectionId, ReqNo, VectorClock, SessionRole),
     SendMessage(ConnectionId, ReqNo, SsbId, Value, SessionRole),
@@ -58,7 +60,7 @@ pub enum EbtEvent {
     ReceivedMessage(Message),
     SessionConcluded(ConnectionId, SsbId),
     SessionTimeout(ConnectionData, SsbId),
-    Error(ConnectionData, Option<ReqNo>, SsbId, ErrorMsg),
+    Error(ConnectionData, SsbId, ErrorMsg),
 }
 
 /// Role of a peer in an EBT session.
@@ -694,11 +696,10 @@ impl EbtManager {
     async fn handle_error(
         &mut self,
         connection_data: ConnectionData,
-        req_no: Option<ReqNo>,
         peer_ssb_id: SsbId,
         error_msg: ErrorMsg,
     ) -> Result<()> {
-        trace!(target: "ebt-replication", "Session error with {} for request number {:?}: {}", peer_ssb_id, req_no, error_msg);
+        trace!(target: "ebt-replication", "Session error with {}: {}", peer_ssb_id, error_msg);
 
         self.remove_session(connection_data.id);
 
@@ -807,8 +808,8 @@ impl EbtManager {
                                     error!("Error while handling 'session timeout' event: {}", err)
                                 }
                             }
-                            EbtEvent::Error(connection_data, req_no, peer_ssb_id, error_msg) => {
-                                if let Err(err) = self.handle_error(connection_data, req_no, peer_ssb_id, error_msg).await {
+                            EbtEvent::Error(connection_data, peer_ssb_id, error_msg) => {
+                                if let Err(err) = self.handle_error(connection_data, peer_ssb_id, error_msg).await {
                                     error!("Error while handling 'error' event: {}", err)
                                 }
                             }

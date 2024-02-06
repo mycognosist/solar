@@ -60,11 +60,14 @@ impl Display for TcpConnection {
     }
 }
 
+/// Unique ID for a connection.
+pub type ConnectionId = usize;
+
 /// Connection data.
 #[derive(Debug, Default, Clone)]
 pub struct ConnectionData {
     /// Connection identifier.
-    pub id: usize,
+    pub id: ConnectionId,
     /// The address of the remote peer.
     pub peer_addr: Option<String>,
     /// The public key of the remote peer.
@@ -105,7 +108,7 @@ impl Display for ConnectionData {
 }
 
 impl ConnectionData {
-    pub fn new(id: usize) -> Self {
+    pub fn new(id: ConnectionId) -> Self {
         ConnectionData {
             id,
             ..ConnectionData::default()

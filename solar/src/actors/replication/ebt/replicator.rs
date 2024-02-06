@@ -37,6 +37,8 @@ pub async fn run(
 
     let mut ch_msg = ch_msg.ok_or(Error::OptionIsNone)?;
 
+    let connection_id = connection_data.id;
+
     let stream_reader = connection_data.stream.clone().ok_or(Error::OptionIsNone)?;
     let stream_writer = connection_data.stream.clone().ok_or(Error::OptionIsNone)?;
     let handshake = connection_data
@@ -73,7 +75,7 @@ pub async fn run(
     trace!(target: "ebt-session", "Initiating EBT replication session with: {}", peer_ssb_id);
 
     let mut session_initiated = false;
-    let mut replicate_req_no = None;
+    let mut active_req_no = None;
 
     // Record the time at which we begin the EBT session.
     //
@@ -85,10 +87,9 @@ pub async fn run(
         // Send EBT request.
         let ebt_args = EbtReplicate::default();
         let req_no = api.ebt_replicate_req_send(&ebt_args).await?;
-        // Set the request number to be passed into the MUXRPC EBT handler.
-        // This allows tracking of the request (ensuring we respond to
-        // MUXRPC responses with this request number).
-        replicate_req_no = Some(req_no);
+
+        // Set the request number for this session.
+        active_req_no = Some(req_no);
     }
 
     loop {
@@ -105,9 +106,10 @@ pub async fn run(
             },
             msg = ch_msg.next().fuse() => {
                 // Listen for a 'session initiated' event.
-                if let Some(BrokerMessage::Ebt(EbtEvent::SessionInitiated(_, ref ssb_id, ref session_role))) = msg {
+                if let Some(BrokerMessage::Ebt(EbtEvent::SessionInitiated(_connection_id, ref req_no, ref ssb_id, ref session_role))) = msg {
                     if peer_ssb_id == *ssb_id && *session_role == SessionRole::Responder {
                         session_initiated = true;
+                        active_req_no = Some(*req_no);
                     }
                 }
                 if let Some(msg) = msg {
@@ -123,8 +125,11 @@ pub async fn run(
                 &mut api,
                 &input,
                 &mut ch_broker,
+                // TODO: Can we remove this?
+                // We could look it up from the connection ID instead.
                 peer_ssb_id.to_owned(),
-                replicate_req_no,
+                connection_data.id,
+                active_req_no,
             )
             .await
         {
@@ -132,20 +137,16 @@ pub async fn run(
             Err(err) => {
                 error!("EBT replicate handler failed: {:?}", err);
 
-                if let Error::EbtReplicate((req_no, err_msg)) = err {
-                    ch_broker
-                        .send(BrokerEvent::new(
-                            Destination::Broadcast,
-                            BrokerMessage::Ebt(EbtEvent::Error(
-                                connection_data,
-                                req_no,
-                                peer_ssb_id.to_owned(),
-                                err_msg,
-                            )),
-                        ))
-                        .await?;
-                }
-
+                ch_broker
+                    .send(BrokerEvent::new(
+                        Destination::Broadcast,
+                        BrokerMessage::Ebt(EbtEvent::Error(
+                            connection_data,
+                            peer_ssb_id.to_owned(),
+                            err.to_string(),
+                        )),
+                    ))
+                    .await?;
                 // Break out of the input processing loop to conclude
                 // the replication session.
                 break;
@@ -165,7 +166,10 @@ pub async fn run(
             ch_broker
                 .send(BrokerEvent::new(
                     Destination::Broadcast,
-                    BrokerMessage::Ebt(EbtEvent::SessionTimeout(connection_data)),
+                    BrokerMessage::Ebt(EbtEvent::SessionTimeout(
+                        connection_data,
+                        peer_ssb_id.to_owned(),
+                    )),
                 ))
                 .await?;
 
@@ -175,10 +179,12 @@ pub async fn run(
         }
     }
 
+    // TODO: Consider including session role in SessionConcluded so that we can
+    // await another request if acting as the responder.
     ch_broker
         .send(BrokerEvent::new(
             Destination::Broadcast,
-            BrokerMessage::Ebt(EbtEvent::SessionConcluded(peer_ssb_id)),
+            BrokerMessage::Ebt(EbtEvent::SessionConcluded(connection_id, peer_ssb_id)),
         ))
         .await?;
 

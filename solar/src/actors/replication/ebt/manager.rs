@@ -60,6 +60,7 @@ pub enum EbtEvent {
     ReceivedMessage(Message),
     SessionConcluded(ConnectionId, SsbId),
     SessionTimeout(ConnectionData, SsbId),
+    TerminateSession(ConnectionId, SessionRole),
     Error(ConnectionData, SsbId, ErrorMsg),
 }
 
@@ -686,6 +687,10 @@ impl EbtManager {
         Ok(())
     }
 
+    async fn handle_terminate_session(&mut self, connection_id: ConnectionId) {
+        trace!(target: "ebt-replication", "Terminating session for connection {}", connection_id);
+    }
+
     async fn handle_error(
         &mut self,
         connection_data: ConnectionData,
@@ -800,6 +805,9 @@ impl EbtManager {
                                 if let Err(err) = self.handle_session_timeout(connection_data, peer_ssb_id).await {
                                     error!("Error while handling 'session timeout' event: {}", err)
                                 }
+                            }
+                            EbtEvent::TerminateSession(connection_data, _session_role) => {
+                                self.handle_terminate_session(connection_data).await;
                             }
                             EbtEvent::Error(connection_data, peer_ssb_id, error_msg) => {
                                 if let Err(err) = self.handle_error(connection_data, peer_ssb_id, error_msg).await {

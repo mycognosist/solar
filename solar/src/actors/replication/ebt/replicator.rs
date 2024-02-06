@@ -75,7 +75,7 @@ pub async fn run(
     trace!(target: "ebt-session", "Initiating EBT replication session with: {}", peer_ssb_id);
 
     let mut session_initiated = false;
-    let mut replicate_req_no = None;
+    let mut active_req_no = None;
 
     // Record the time at which we begin the EBT session.
     //
@@ -83,15 +83,13 @@ pub async fn run(
     // received.
     let ebt_session_start = Instant::now();
 
-    // TODO: Could this be moved into the MUXRPC EBT handler?
     if let SessionRole::Requester = session_role {
         // Send EBT request.
         let ebt_args = EbtReplicate::default();
         let req_no = api.ebt_replicate_req_send(&ebt_args).await?;
-        // Set the request number to be passed into the MUXRPC EBT handler.
-        // This allows tracking of the request (ensuring we respond to
-        // MUXRPC responses with this request number).
-        replicate_req_no = Some(req_no);
+
+        // Set the request number for this session.
+        active_req_no = Some(req_no);
     }
 
     loop {
@@ -111,7 +109,7 @@ pub async fn run(
                 if let Some(BrokerMessage::Ebt(EbtEvent::SessionInitiated(_connection_id, ref req_no, ref ssb_id, ref session_role))) = msg {
                     if peer_ssb_id == *ssb_id && *session_role == SessionRole::Responder {
                         session_initiated = true;
-                        replicate_req_no = Some(*req_no);
+                        active_req_no = Some(*req_no);
                     }
                 }
                 if let Some(msg) = msg {
@@ -127,9 +125,11 @@ pub async fn run(
                 &mut api,
                 &input,
                 &mut ch_broker,
+                // TODO: Can we remove this?
+                // We could look it up from the connection ID instead.
                 peer_ssb_id.to_owned(),
-                replicate_req_no,
                 connection_data.id,
+                active_req_no,
             )
             .await
         {
@@ -142,7 +142,6 @@ pub async fn run(
                         Destination::Broadcast,
                         BrokerMessage::Ebt(EbtEvent::Error(
                             connection_data,
-                            replicate_req_no,
                             peer_ssb_id.to_owned(),
                             err.to_string(),
                         )),

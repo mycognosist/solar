@@ -85,7 +85,7 @@ where
                 self.recv_error_response(api, *req_no, err).await
             }
             // Handle a broker message.
-            RpcInput::Message(BrokerMessage::StoreKv(StoreKvEvent(ssb_id))) => {
+            RpcInput::Message(BrokerMessage::StoreKv(StoreKvEvent((ssb_id, _seq)))) => {
                 // Notification from the key-value store indicating that
                 // a new message has just been appended to the feed
                 // identified by `ssb_id`.

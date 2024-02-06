@@ -15,7 +15,7 @@ use crate::{
         network::connection::ConnectionData,
         replication::ebt::{EbtEvent, SessionRole},
     },
-    broker::{ActorEndpoint, BrokerEvent, BrokerMessage, Destination, BROKER},
+    broker::{ActorEndpoint, BrokerEvent, BrokerMessage, Destination, Void, BROKER},
     Error, Result,
 };
 
@@ -27,7 +27,9 @@ pub async fn run(
     // Register the EBT replication loop actor with the broker.
     let ActorEndpoint {
         ch_terminate,
+        ch_terminated,
         ch_msg,
+        mut ch_broker,
         ..
     } = BROKER
         .lock()
@@ -69,9 +71,6 @@ pub async fn run(
     let rpc_recv_stream = rpc_reader.into_stream().fuse();
     pin_mut!(rpc_recv_stream);
 
-    // Create channel to send messages to broker.
-    let mut ch_broker = BROKER.lock().await.create_sender();
-
     trace!(target: "ebt-session", "Initiating EBT replication session with: {}", peer_ssb_id);
 
     let mut session_initiated = false;
@@ -98,13 +97,26 @@ pub async fn run(
         // ready, one will be selected in order of declaration.
         let input = select_biased! {
             _value = ch_terminate_fuse =>  {
-                break;
+                // Communicate stream termination to the session peer.
+                RpcInput::Message(
+                    BrokerMessage::Ebt(
+                        EbtEvent::TerminateSession(connection_id, session_role.to_owned())
+                    )
+                )
             },
             packet = rpc_recv_stream.select_next_some() => {
                 let (req_no, packet) = packet;
                 RpcInput::Network(req_no, packet)
             },
             msg = ch_msg.next().fuse() => {
+                // Listen for a 'session concluded' event and terminate the
+                // replicator if the connection ID of the event matches the
+                // ID of this instance of the replicator.
+                if let Some(BrokerMessage::Ebt(EbtEvent::SessionConcluded(conn_id, _))) = msg {
+                    if connection_id == conn_id {
+                        break
+                    }
+                }
                 // Listen for a 'session initiated' event.
                 if let Some(BrokerMessage::Ebt(EbtEvent::SessionInitiated(_connection_id, ref req_no, ref ssb_id, ref session_role))) = msg {
                     if peer_ssb_id == *ssb_id && *session_role == SessionRole::Responder {
@@ -187,6 +199,9 @@ pub async fn run(
             BrokerMessage::Ebt(EbtEvent::SessionConcluded(connection_id, peer_ssb_id)),
         ))
         .await?;
+
+    // Send 'terminated' signal to broker.
+    let _ = ch_terminated.send(Void {});
 
     Ok(())
 }

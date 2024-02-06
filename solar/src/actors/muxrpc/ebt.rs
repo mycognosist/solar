@@ -93,6 +93,18 @@ where
             }
             // Handle a broker message.
             RpcInput::Message(msg) => match msg {
+                BrokerMessage::Ebt(EbtEvent::TerminateSession(conn_id, session_role)) => {
+                    if conn_id == &connection_id {
+                        let req_no = match session_role {
+                            SessionRole::Requester => self.active_request,
+                            SessionRole::Responder => -(self.active_request),
+                        };
+
+                        return self.send_cancelstream(api, req_no).await;
+                    }
+
+                    Ok(false)
+                }
                 BrokerMessage::Ebt(EbtEvent::SendClock(conn_id, req_no, clock, session_role)) => {
                     // This is, regrettably, rather unintuitive.
                     //
@@ -324,10 +336,18 @@ where
         Ok(false)
     }
 
-    /// Remove the associated request from the map of active requests and close
-    /// the stream.
+    /// Receive close-stream request.
     async fn recv_cancelstream(&mut self, api: &mut ApiCaller<W>, req_no: ReqNo) -> Result<bool> {
         trace!(target: "ebt-handler", "Received cancel stream RPC response: {}", req_no);
+
+        api.rpc().send_stream_eof(-req_no).await?;
+
+        Ok(true)
+    }
+
+    /// Send close-stream request.
+    async fn send_cancelstream(&mut self, api: &mut ApiCaller<W>, req_no: ReqNo) -> Result<bool> {
+        trace!(target: "ebt-handler", "Send cancel stream RPC response: {}", req_no);
 
         api.rpc().send_stream_eof(-req_no).await?;
 

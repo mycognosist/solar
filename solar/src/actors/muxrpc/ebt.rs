@@ -1,12 +1,12 @@
 //! Epidemic Broadcast Tree (EBT) Replication Handler.
 
-use std::{collections::HashMap, marker::PhantomData};
+use std::marker::PhantomData;
 
 use async_std::io::Write;
 use futures::SinkExt;
 use kuska_ssb::{
     api::{
-        dto::{self, content::SsbId},
+        dto::{self},
         ApiCaller, ApiMethod,
     },
     feed::{Feed as MessageKvt, Message},
@@ -30,7 +30,10 @@ where
     W: Write + Unpin + Send + Sync,
 {
     /// EBT-related requests which are known and allowed.
-    active_requests: HashMap<ReqNo, SsbId>,
+    // TODO: Include connection ID as key. Then we can remove request ID from
+    // all `EbtEvent` variants and simply look-up the request ID associated
+    // with the connection ID (as defined in the `EbtEvent` data).
+    active_request: ReqNo,
     phantom: PhantomData<W>,
 }
 
@@ -38,6 +41,14 @@ impl<W> EbtReplicateHandler<W>
 where
     W: Write + Unpin + Send + Sync,
 {
+    /// Instantiate a new instance of `EbtReplicateHandler`.
+    pub fn new() -> Self {
+        Self {
+            active_request: 0,
+            phantom: PhantomData,
+        }
+    }
+
     /// Handle an RPC event.
     pub async fn handle(
         &mut self,
@@ -45,49 +56,27 @@ where
         op: &RpcInput,
         ch_broker: &mut ChBrokerSend,
         peer_ssb_id: String,
-        active_request: Option<ReqNo>,
         connection_id: usize,
+        active_req_no: Option<ReqNo>,
     ) -> Result<bool> {
         trace!(target: "muxrpc-ebt-handler", "Received MUXRPC input: {:?}", op);
 
         // An outbound EBT replicate request was made before the handler was
-        // called; add it to the map of active requests.
-        if let Some(session_req_no) = active_request {
-            let _ = self
-                .active_requests
-                .insert(session_req_no, peer_ssb_id.to_owned());
+        // called.
+        if let Some(req_no) = active_req_no {
+            self.active_request = req_no
         }
 
         match op {
             // Handle an incoming MUXRPC request.
             RpcInput::Network(req_no, rpc::RecvMsg::RpcRequest(req)) => {
-                match ApiMethod::from_rpc_body(req) {
-                    Some(ApiMethod::EbtReplicate) => {
-                        self.recv_ebtreplicate(api, *req_no, req, peer_ssb_id, connection_id)
-                            .await
-                    }
-                    _ => Ok(false),
-                }
+                self.recv_rpc_request(api, *req_no, req, peer_ssb_id, connection_id)
+                    .await
             }
+            // Hanlde an incoming 'other' MUXRPC request.
             RpcInput::Network(req_no, rpc::RecvMsg::OtherRequest(_type, req)) => {
-                // Attempt to deserialize bytes into vector clock hashmap.
-                // If the deserialization is successful, emit a 'received clock'
-                // event.
-                if let Ok(clock) = serde_json::from_slice(req) {
-                    ch_broker
-                        .send(BrokerEvent::new(
-                            Destination::Broadcast,
-                            BrokerMessage::Ebt(EbtEvent::ReceivedClock(
-                                connection_id,
-                                *req_no,
-                                peer_ssb_id,
-                                clock,
-                            )),
-                        ))
-                        .await?;
-                }
-
-                Ok(false)
+                self.recv_other_request(ch_broker, *req_no, req, peer_ssb_id, connection_id)
+                    .await
             }
             // Handle an incoming MUXRPC response.
             RpcInput::Network(req_no, rpc::RecvMsg::RpcResponse(_type, res)) => {
@@ -162,16 +151,10 @@ where
                     // whom we have an active session and matching request
                     // number.
                     if *conn_id == connection_id {
-                        // TODO: Remove this check; made redundant by the
-                        // connection ID check.
-                        //
-                        // Ensure the message is sent to the correct peer.
-                        if peer_ssb_id == *ssb_id {
-                            let json_msg = msg.to_string();
-                            api.ebt_feed_res_send(req_no, &json_msg).await?;
+                        let json_msg = msg.to_string();
+                        api.ebt_feed_res_send(req_no, &json_msg).await?;
 
-                            trace!(target: "ebt", "Sent message to {} on connection {}", ssb_id, conn_id);
-                        }
+                        trace!(target: "ebt", "Sent message to {} on connection {}", ssb_id, conn_id);
                     }
 
                     Ok(false)
@@ -181,17 +164,22 @@ where
             _ => Ok(false),
         }
     }
-}
 
-impl<W> EbtReplicateHandler<W>
-where
-    W: Write + Unpin + Send + Sync,
-{
-    /// Instantiate a new instance of `EbtReplicateHandler`.
-    pub fn new() -> Self {
-        Self {
-            active_requests: HashMap::new(),
-            phantom: PhantomData,
+    /// Process an incoming MUXRPC request.
+    async fn recv_rpc_request(
+        &mut self,
+        api: &mut ApiCaller<W>,
+        req_no: ReqNo,
+        req: &rpc::Body,
+        peer_ssb_id: String,
+        connection_id: usize,
+    ) -> Result<bool> {
+        match ApiMethod::from_rpc_body(req) {
+            Some(ApiMethod::EbtReplicate) => {
+                self.recv_ebtreplicate(api, req_no, req, peer_ssb_id, connection_id)
+                    .await
+            }
+            _ => Ok(false),
         }
     }
 
@@ -230,9 +218,8 @@ where
 
         trace!(target: "ebt-handler", "Successfully validated replicate request arguments");
 
-        // Insert the request number and peer public key into the active
-        // requests map.
-        self.active_requests.insert(req_no, peer_ssb_id.to_owned());
+        // Set the request number for this session.
+        self.active_request = req_no;
 
         ch_broker
             .send(BrokerEvent::new(
@@ -245,6 +232,35 @@ where
                 )),
             ))
             .await?;
+
+        Ok(false)
+    }
+
+    /// Process an incoming MUXRPC request containing a vector clock.
+    async fn recv_other_request(
+        &mut self,
+        ch_broker: &mut ChBrokerSend,
+        req_no: ReqNo,
+        req: &[u8],
+        peer_ssb_id: String,
+        connection_id: usize,
+    ) -> Result<bool> {
+        // Attempt to deserialize bytes into vector clock hashmap.
+        // If the deserialization is successful, emit a 'received clock'
+        // event.
+        if let Ok(clock) = serde_json::from_slice(req) {
+            ch_broker
+                .send(BrokerEvent::new(
+                    Destination::Broadcast,
+                    BrokerMessage::Ebt(EbtEvent::ReceivedClock(
+                        connection_id,
+                        req_no,
+                        peer_ssb_id,
+                        clock,
+                    )),
+                ))
+                .await?;
+        }
 
         Ok(false)
     }
@@ -264,7 +280,7 @@ where
         // Only handle the response if the associated request number is known
         // to us, either because we sent or received the initiating replicate
         // request.
-        if self.active_requests.contains_key(&req_no) {
+        if self.active_request == req_no || self.active_request == -(req_no) {
             // The response may be a vector clock (aka. notes) or an SSB message.
             //
             // Since there is no explicit way to determine which was received,
@@ -313,7 +329,6 @@ where
     async fn recv_cancelstream(&mut self, api: &mut ApiCaller<W>, req_no: ReqNo) -> Result<bool> {
         trace!(target: "ebt-handler", "Received cancel stream RPC response: {}", req_no);
 
-        self.active_requests.remove(&req_no);
         api.rpc().send_stream_eof(-req_no).await?;
 
         Ok(true)
@@ -323,8 +338,6 @@ where
     /// active requests.
     async fn recv_error_response(&mut self, req_no: ReqNo, err_msg: &str) -> Result<bool> {
         warn!("Received MUXRPC error response: {}", err_msg);
-
-        self.active_requests.remove(&req_no);
 
         Err(Error::EbtReplicate((req_no, err_msg.to_string())))
     }

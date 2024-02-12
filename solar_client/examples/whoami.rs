@@ -5,7 +5,7 @@ const SERVER_ADDR: &str = "http://127.0.0.1:3030";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let client = Client::new(SERVER_ADDR.to_owned());
+    let client = Client::new(SERVER_ADDR.to_owned())?;
 
     let whoami = client.whoami().await?;
     println!("{}", whoami);

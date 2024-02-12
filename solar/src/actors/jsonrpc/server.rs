@@ -8,24 +8,9 @@ use jsonrpsee::server::{logger::Params, RpcModule, ServerBuilder};
 use jsonrpsee::types::error::ErrorObject as JsonRpcError;
 use kuska_ssb::{api::dto::content::TypedMessage, feed::Message, keystore::OwnedIdentity};
 use log::{info, warn};
-use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::{broker::*, error::Error, node::KV_STORE, Result};
-
-/// The name of a channel.
-#[derive(Debug, Deserialize)]
-struct Channel(String);
-
-/// Message reference containing the key (sha256 hash) of a message.
-/// Used to parse the key from the parameters supplied to the `message`
-/// endpoint.
-#[derive(Debug, Deserialize)]
-struct MsgRef(String);
-
-/// The public key (ID) of a peer.
-#[derive(Debug, Deserialize)]
-struct PubKey(String);
 
 /// Register the JSON-RPC server endpoint, define the JSON-RPC methods
 /// and spawn the server.

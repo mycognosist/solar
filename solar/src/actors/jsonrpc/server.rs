@@ -17,13 +17,6 @@ use crate::{broker::*, error::Error, node::KV_STORE, Result};
 #[derive(Debug, Deserialize)]
 struct Channel(String);
 
-/// The public keys (ID) of two peers.
-#[derive(Debug, Deserialize)]
-struct IsFollowing {
-    peer_a: String,
-    peer_b: String,
-}
-
 /// Message reference containing the key (sha256 hash) of a message.
 /// Used to parse the key from the parameters supplied to the `message`
 /// endpoint.
@@ -199,12 +192,12 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
     // Returns a boolean.
     rpc_module.register_method("is_following", move |params: Params, _| {
         task::block_on(async {
-            let peers: IsFollowing = params.parse()?;
+            let peers = params.parse::<Vec<String>>()?;
 
             let db = KV_STORE.read().await;
 
             let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
-            let is_following = indexes.is_following(&peers.peer_a, &peers.peer_b)?;
+            let is_following = indexes.is_following(&peers[0], &peers[1])?;
             let response = json!(is_following);
 
             Ok::<Value, JsonRpcError>(response)

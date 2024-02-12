@@ -416,13 +416,13 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
     rpc_module.register_method("message", move |params: Params, _| {
         task::block_on(async {
             // Parse the parameter containing the message reference (key).
-            let msg_ref: MsgRef = params.parse()?;
+            let msg_ref = params.parse::<Vec<String>>()?;
 
             // Open the primary KV database for reading.
             let db = KV_STORE.read().await;
 
             // Retrieve the message value for the requested message.
-            let msg_val = db.get_msg_val(&msg_ref.0)?;
+            let msg_val = db.get_msg_val(&msg_ref[0])?;
 
             // Retrieve the message KVT for the requested message using the
             // author and sequence fields from the message value.

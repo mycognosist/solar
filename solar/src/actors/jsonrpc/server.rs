@@ -61,13 +61,13 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
     rpc_module.register_method("blocks", move |params: Params, _| {
         task::block_on(async {
             // Parse the parameter containing the public key.
-            let pub_key: PubKey = params.parse()?;
+            let pub_key = params.parse::<Vec<String>>()?;
 
             // Open the primary KV database for reading.
             let db = KV_STORE.read().await;
 
             let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
-            let blocks = indexes.get_blocks(&pub_key.0)?;
+            let blocks = indexes.get_blocks(&pub_key[0])?;
             let response = json!(blocks);
 
             Ok::<Value, JsonRpcError>(response)

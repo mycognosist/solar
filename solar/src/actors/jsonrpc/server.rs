@@ -330,12 +330,12 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
     // Returns a string.
     rpc_module.register_method("latest_name", move |params: Params, _| {
         task::block_on(async {
-            let pub_key: PubKey = params.parse()?;
+            let pub_key = params.parse::<Vec<String>>()?;
 
             let db = KV_STORE.read().await;
 
             let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
-            let names = indexes.get_latest_name(&pub_key.0)?;
+            let names = indexes.get_latest_name(&pub_key[0])?;
             let response = json!(names);
 
             Ok::<Value, JsonRpcError>(response)

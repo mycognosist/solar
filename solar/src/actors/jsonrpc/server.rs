@@ -296,12 +296,12 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
     // Returns an array of strings.
     rpc_module.register_method("names", move |params: Params, _| {
         task::block_on(async {
-            let pub_key: PubKey = params.parse()?;
+            let pub_key = params.parse::<Vec<String>>()?;
 
             let db = KV_STORE.read().await;
 
             let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
-            let names = indexes.get_names(&pub_key.0)?;
+            let names = indexes.get_names(&pub_key[0])?;
             let response = json!(names);
 
             Ok::<Value, JsonRpcError>(response)

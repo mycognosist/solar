@@ -2,4 +2,6 @@
 members = [
   "solar",
   "solar_cli",
+  "solar_client",
 ]
+resolver = "2"

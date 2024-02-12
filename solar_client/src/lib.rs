@@ -2,6 +2,8 @@ use anyhow::Result;
 
 #[jsonrpc_client::api]
 pub trait SolarClient {
+    async fn blocks(&self, pub_key: &str) -> Vec<String>;
+
     async fn ping(&self) -> String;
 
     async fn whoami(&self) -> String;

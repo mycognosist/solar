@@ -113,12 +113,12 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
     // Returns an array of descriptions.
     rpc_module.register_method("self_descriptions", move |params: Params, _| {
         task::block_on(async {
-            let pub_key: PubKey = params.parse()?;
+            let pub_key = params.parse::<Vec<String>>()?;
 
             let db = KV_STORE.read().await;
 
             let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
-            let descriptions = indexes.get_self_assigned_descriptions(&pub_key.0)?;
+            let descriptions = indexes.get_self_assigned_descriptions(&pub_key[0])?;
             let response = json!(descriptions);
 
             Ok::<Value, JsonRpcError>(response)

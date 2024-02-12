@@ -398,13 +398,13 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
     rpc_module.register_method("feed", move |params: Params, _| {
         task::block_on(async {
             // Parse the parameter containing the public key.
-            let pub_key: PubKey = params.parse()?;
+            let pub_key = params.parse::<Vec<String>>()?;
 
             // Open the primary KV database for reading.
             let db = KV_STORE.read().await;
 
             // Retrieve the message value for the requested message.
-            let feed = db.get_feed(&pub_key.0)?;
+            let feed = db.get_feed(&pub_key[0])?;
             let response = json!(feed);
 
             Ok::<Value, JsonRpcError>(response)

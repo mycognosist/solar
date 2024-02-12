@@ -381,12 +381,12 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
     // Returns an array of channel names.
     rpc_module.register_method("subscriptions", move |params: Params, _| {
         task::block_on(async {
-            let pub_key: PubKey = params.parse()?;
+            let pub_key = params.parse::<Vec<String>>()?;
 
             let db = KV_STORE.read().await;
 
             let indexes = &db.indexes.as_ref().ok_or(Error::Indexes)?;
-            let subscriptions = indexes.get_channel_subscriptions(&pub_key.0)?;
+            let subscriptions = indexes.get_channel_subscriptions(&pub_key[0])?;
             let response = json!(subscriptions);
 
             Ok::<Value, JsonRpcError>(response)

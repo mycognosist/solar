@@ -69,8 +69,8 @@ While running, a solar node can be queried using JSON-RPC over HTTP.
 | --- | --- | --- | --- |
 | `blocks` | `"<@...=.ed25519>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
 | `blockers` | `"<@...=.ed25519>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `descriptions` | `"<@...=.ed25519>"` | `[(<@...=.ed25519>, <description>)]` | Returns an array of tuples containing a public key and description |
-| `self_descriptions` | `"<@...=.ed25519>"` | `[<description>]` | Returns an array of descriptions |
+| `descriptions` | `"<@...=.ed25519>"` | `[(<@...=.ed25519>, <description>)]` | Returns an array of tuples, each containing a public key and description |
+| `self_descriptions` | `"<@...=.ed25519>"` | `[(<@...=.ed25519>, <description>)]` | Returns an array of tuples, each containing a public key and description |
 | `latest_description` | `"<@...=.ed25519>"` | `<description>` | Returns a single description |
 | `latest_self_description` | `"<@...=.ed25519>"` | `<description>` | Returns a single description |
 | `feed` | `"<@...=.ed25519>"` | `[{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }]` | Returns an array of message KVTs (key, value, timestamp) from the local database |

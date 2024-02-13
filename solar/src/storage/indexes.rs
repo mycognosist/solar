@@ -307,9 +307,12 @@ impl Indexes {
     }
 
     /// Return the most recently indexed description for the given public key.
-    pub fn get_latest_description(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
+    pub fn get_latest_description(&self, ssb_id: &str) -> Result<Option<String>> {
         let descriptions = self.get_descriptions(ssb_id)?;
-        let description = descriptions.last().cloned();
+        let description = descriptions
+            .last()
+            .map(|(_ssb_id, description)| description)
+            .cloned();
 
         Ok(description)
     }

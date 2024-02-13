@@ -18,6 +18,8 @@ pub trait SolarClient {
 
     async fn follows(&self, pub_key: &str) -> Vec<String>;
 
+    async fn followers(&self, pub_key: &str) -> Vec<String>;
+
     async fn ping(&self) -> String;
 
     async fn whoami(&self) -> String;

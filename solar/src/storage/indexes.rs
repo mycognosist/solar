@@ -299,17 +299,21 @@ impl Indexes {
     }
 
     /// Return all indexed self-assigned descriptions for the given public key.
-    pub fn get_self_assigned_descriptions(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
-        let mut descriptions = self.get_descriptions(ssb_id)?;
-        descriptions.retain(|(author, _description)| author == ssb_id);
+    pub fn get_self_assigned_descriptions(&self, ssb_id: &str) -> Result<Vec<String>> {
+        let descriptions = self
+            .get_descriptions(ssb_id)?
+            .into_iter()
+            .filter(|(author, _description)| author == ssb_id)
+            .map(|(_ssb_id, description)| description)
+            .collect();
 
         Ok(descriptions)
     }
 
     /// Return the most recently indexed description for the given public key.
     pub fn get_latest_description(&self, ssb_id: &str) -> Result<Option<String>> {
-        let descriptions = self.get_descriptions(ssb_id)?;
-        let description = descriptions
+        let description = self
+            .get_descriptions(ssb_id)?
             .last()
             .map(|(_ssb_id, description)| description)
             .cloned();
@@ -319,10 +323,7 @@ impl Indexes {
 
     /// Return the most recently indexed self-assigned description for the given
     /// public key.
-    pub fn get_latest_self_assigned_description(
-        &self,
-        ssb_id: &str,
-    ) -> Result<Option<(String, String)>> {
+    pub fn get_latest_self_assigned_description(&self, ssb_id: &str) -> Result<Option<String>> {
         let self_descriptions = self.get_self_assigned_descriptions(ssb_id)?;
         let description = self_descriptions.last().cloned();
 

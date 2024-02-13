@@ -134,7 +134,7 @@ While running, a solar node can be queried using JSON-RPC over HTTP.
 | --- | --- | --- | --- |
 | `blocks` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
 | `blockers` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `descriptions` | `{ "pub_key": "<@...=.ed25519>" }` | `[<description>]` | Returns an array of descriptions |
+| `descriptions` | `{ "pub_key": "<@...=.ed25519>" }` | `[(<@...=.ed25519>, <description>)]` | Returns an array of tuples, each containing a public key and a description |
 | `self_descriptions` | `{ "pub_key": "<@...=.ed25519>" }` | `[<description>]` | Returns an array of descriptions |
 | `latest_description` | `{ "pub_key": "<@...=.ed25519>" }` | `<description>` | Returns a single description |
 | `latest_self_description` | `{ "pub_key": "<@...=.ed25519>" }` | `<description>` | Returns a single description |
@@ -143,7 +143,7 @@ While running, a solar node can be queried using JSON-RPC over HTTP.
 | `followers` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
 | `is_following` | `{ "peer_a": "<@...=.ed25519>", "peer_b": "<@...=.ed25519>" }` | `<bool>` | Returns a boolean |
 | `friends` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `images` | `{ "pub_key": "<@...=.ed25519>" }` | `[<&...=.sha256>]` | Returns an array of image references |
+| `images` | `{ "pub_key": "<@...=.ed25519>" }` | `[(<@...=.ed25519>, <&...=.sha256>)]` | Returns an array of tuples, each containing a public key and an image reference |
 | `self_images` | `{ "pub_key": "<@...=.ed25519>" }` | `[<&...=.sha256>]` | Returns an array of image references |
 | `latest_image` | `{ "pub_key": "<@...=.ed25519>" }` | `<&...=.sha256>` | Returns a single image reference |
 | `latest_self_image` | `{ "pub_key": "<@...=.ed25519>" }` | `<&...=.sha256>` | Returns a single image reference |

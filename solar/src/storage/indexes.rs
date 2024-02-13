@@ -464,9 +464,13 @@ impl Indexes {
 
     /// Return all indexed self-assigned image references for the given public
     /// key.
-    pub fn get_self_assigned_images(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
-        let mut images = self.get_images(ssb_id)?;
-        images.retain(|(author, _image)| author == ssb_id);
+    pub fn get_self_assigned_images(&self, ssb_id: &str) -> Result<Vec<String>> {
+        let images = self
+            .get_images(ssb_id)?
+            .into_iter()
+            .filter(|(author, _image)| author == ssb_id)
+            .map(|(_ssb_id, image)| image)
+            .collect();
 
         Ok(images)
     }
@@ -482,7 +486,7 @@ impl Indexes {
 
     /// Return the most recently indexed self-assigned image reference for the
     /// given public key.
-    pub fn get_latest_self_assigned_image(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
+    pub fn get_latest_self_assigned_image(&self, ssb_id: &str) -> Result<Option<String>> {
         let images = self.get_self_assigned_images(ssb_id)?;
         let image = images.last().cloned();
 

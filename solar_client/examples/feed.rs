@@ -2,7 +2,7 @@ use anyhow::Result;
 use solar_client::{Client, SolarClient};
 
 const SERVER_ADDR: &str = "http://127.0.0.1:3030";
-const PUB_KEY: &str = "@HEqy940T6uB+T+d9Jaa58aNfRzLx9eRWqkZljBmnkmk=.ed25519";
+const PUB_KEY: &str = "@qK93G/R9R5J2fiqK+kxV72HqqPUcss+rth8rACcYr4s=.ed25519";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -10,12 +10,7 @@ async fn main() -> Result<()> {
 
     let feed = client.feed(PUB_KEY).await?;
     println!("{:#?}", feed);
-    // [
-    //     "@dW5ch5miTnxLJDVDtB4ZCvrVxh+S8kGCQIBbd5paLhw=.ed25519",
-    //     "@QIlKZ8DMw9XpjpRZ96RBLpfkLnOUZSqamC6WMddGh3I=.ed25519",
-    //     ...
-    //     "@+rMXLy1md42gvbBq+6l6rp95/drh6QyACO1ZZMMnWI0=.ed25519",
-    // ]
+    // TODO
 
     Ok(())
 }

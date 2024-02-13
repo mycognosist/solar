@@ -28,6 +28,8 @@ pub trait SolarClient {
 
     async fn self_images(&self, pub_key: &str) -> Vec<String>;
 
+    async fn latest_image(&self, pub_key: &str) -> (String, String);
+
     async fn ping(&self) -> String;
 
     async fn whoami(&self) -> String;

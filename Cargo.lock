@@ -1878,6 +1878,7 @@ dependencies = [
  "anyhow",
  "jsonrpc_client",
  "reqwest",
+ "serde_json",
  "tokio",
 ]
 

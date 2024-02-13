@@ -6,6 +6,8 @@ pub trait SolarClient {
 
     async fn blockers(&self, pub_key: &str) -> Vec<String>;
 
+    async fn descriptions(&self, pub_key: &str) -> Vec<(String, String)>;
+
     async fn ping(&self) -> String;
 
     async fn whoami(&self) -> String;

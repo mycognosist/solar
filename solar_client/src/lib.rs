@@ -36,6 +36,8 @@ pub trait SolarClient {
 
     async fn message(&self, msg_ref: &str) -> Value;
 
+    async fn names(&self, pub_key: &str) -> Vec<(String, String)>;
+
     async fn ping(&self) -> String;
 
     async fn whoami(&self) -> String;

@@ -48,6 +48,8 @@ pub trait SolarClient {
 
     async fn ping(&self) -> String;
 
+    async fn subscribers(&self, channel: &str) -> Vec<String>;
+
     async fn whoami(&self) -> String;
 }
 

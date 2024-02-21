@@ -603,7 +603,7 @@ mod test {
 
             indexes.index_msg(&keypair.id, first_msg)?;
 
-            if let Some((_author, description)) = indexes.get_latest_description(&keypair.id)? {
+            if let Some(description) = indexes.get_latest_description(&keypair.id)? {
                 assert_eq!(description, first_description);
             }
 
@@ -640,9 +640,7 @@ mod test {
                 assert_eq!(lastest_name, second_name);
             }
 
-            if let Some((_author, latest_description)) =
-                indexes.get_latest_description(&keypair.id)?
-            {
+            if let Some(latest_description) = indexes.get_latest_description(&keypair.id)? {
                 assert_eq!(latest_description, second_description);
             }
         }

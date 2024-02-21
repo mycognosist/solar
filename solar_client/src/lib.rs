@@ -44,6 +44,8 @@ pub trait SolarClient {
 
     async fn latest_self_name(&self, pub_key: &str) -> String;
 
+    async fn peers(&self) -> Vec<(String, u64)>;
+
     async fn ping(&self) -> String;
 
     async fn whoami(&self) -> String;

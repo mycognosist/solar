@@ -50,6 +50,8 @@ pub trait SolarClient {
 
     async fn subscribers(&self, channel: &str) -> Vec<String>;
 
+    async fn subscriptions(&self, pub_key: &str) -> Vec<String>;
+
     async fn whoami(&self) -> String;
 }
 

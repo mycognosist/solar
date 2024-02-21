@@ -221,7 +221,7 @@ impl KvStorage {
 
     /// Return the public key and latest sequence number for all peers in the
     /// database.
-    pub async fn get_peers(&self) -> Result<Vec<PubKeyAndSeqNum>> {
+    pub async fn get_peers(&self) -> Result<Vec<(String, u64)>> {
         let db = self.db.as_ref().ok_or(Error::OptionIsNone)?;
         let mut peers = Vec::new();
 
@@ -235,8 +235,7 @@ impl KvStorage {
             // Get the latest sequence number for the peer.
             // Fallback to a value of 0 if a `None` value is returned.
             let seq_num = self.get_latest_seq(&pub_key)?.unwrap_or(0);
-            let peer_latest_sequence = PubKeyAndSeqNum { pub_key, seq_num };
-            peers.push(peer_latest_sequence)
+            peers.push((pub_key, seq_num))
         }
 
         Ok(peers)
@@ -479,8 +478,8 @@ mod test {
         assert_eq!(peers.len(), 1);
         // Ensure the public key of the peer matches expectations and that
         // the sequence number is correct.
-        assert_eq!(peers[0].pub_key, keypair.id);
-        assert_eq!(peers[0].seq_num, 1);
+        assert_eq!(peers[0].0, keypair.id);
+        assert_eq!(peers[0].1, 1);
 
         // Create, sign and append a second post-type message.
         let msg_content_2 = TypedMessage::Post {

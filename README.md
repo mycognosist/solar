@@ -8,7 +8,7 @@ or embedded into another Rust application as a [library](https://github.com/myco
 
 :warning: **Solar is alpha software; expect breaking changes** :construction:
 
-[Background](#background) | [Features](#features) | [Installation](#installation) | [Usage](#usage) | [Examples](#examples) | [CLI Options](#options) | [Configuration](#configuration) | [JSON-RPC API](#json-rpc) | [License](#license)
+[Background](#background) | [Features](#features) | [Installation](#installation) | [Usage](#usage) | [Examples](#examples) | [CLI Options](#options) | [Configuration](#configuration) | [License](#license)
 
 ## Background
 
@@ -125,65 +125,6 @@ Alternatively, peers can be added to the replication configuration via CLI optio
 ### Environment Variables
 
 Log-level can be defined by setting the `RUST_LOG` environment variable.
-
-## JSON-RPC API
-
-While running, a solar node can be queried using JSON-RPC over HTTP.
-
-| Method | Parameters | Response | Description |
-| --- | --- | --- | --- |
-| `blocks` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `blockers` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `descriptions` | `{ "pub_key": "<@...=.ed25519>" }` | `[(<@...=.ed25519>, <description>)]` | Returns an array of tuples, each containing a public key and a description |
-| `self_descriptions` | `{ "pub_key": "<@...=.ed25519>" }` | `[<description>]` | Returns an array of descriptions |
-| `latest_description` | `{ "pub_key": "<@...=.ed25519>" }` | `<description>` | Returns a single description |
-| `latest_self_description` | `{ "pub_key": "<@...=.ed25519>" }` | `<description>` | Returns a single description |
-| `feed` | `{ "pub_key": "<@...=.ed25519>" }` | `[{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }]` | Returns an array of message KVTs (key, value, timestamp) from the local database |
-| `follows` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `followers` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `is_following` | `{ "peer_a": "<@...=.ed25519>", "peer_b": "<@...=.ed25519>" }` | `<bool>` | Returns a boolean |
-| `friends` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `images` | `{ "pub_key": "<@...=.ed25519>" }` | `[(<@...=.ed25519>, <&...=.sha256>)]` | Returns an array of tuples, each containing a public key and an image reference |
-| `self_images` | `{ "pub_key": "<@...=.ed25519>" }` | `[<&...=.sha256>]` | Returns an array of image references |
-| `latest_image` | `{ "pub_key": "<@...=.ed25519>" }` | `<&...=.sha256>` | Returns a single image reference |
-| `latest_self_image` | `{ "pub_key": "<@...=.ed25519>" }` | `<&...=.sha256>` | Returns a single image reference |
-| `message` | `{ "msg_ref": "<%...=.sha256>" }` | `{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }` | Returns a single message KVT (key, value, timestamp) from the local database |
-| `names` | `{ "pub_key": "<@...=.ed25519>" }` | `[<name>]` | Returns an array of names |
-| `self_names` | `{ "pub_key": "<@...=.ed25519>" }` | `[<name>]` | Returns an array of names |
-| `latest_name` | `{ "pub_key": "<@...=.ed25519>" }` | `<name>` | Returns a single name |
-| `latest_self_name` | `{ "pub_key": "<@...=.ed25519>" }` | `<name>` | Returns a single name |
-| `peers` | | `[{ "pub_key": "<@...=.ed25519>", "seq_num": <int> }` | Returns an array of public key and latest sequence number for each peer in the local database |
-| `ping` | | `pong!` | Responds if the JSON-RPC server is running |
-| `publish` | `<content>` | `{ "msg_ref": "<%...=.sha256>", "seq_num": <int> }` | Publishes a message and returns the reference (message hash) and sequence number |
-| `subscribers` | `{ "channel": "<channel_name>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `subscriptions` | `{ "pub_key": "<@...=.ed25519>" }` | `[<channel>]` | Returns an array of channel names |
-| `whoami` | | `<@...=.ed25519>` | Returns the public key of the local node |
-
-### Examples
-
-`curl` can be used to invoke the available methods from the commandline.
-
-Request:
-
-`curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "ping", "id":1 }' 127.0.0.1:3030`
-
-Response:
-
-`{"jsonrpc":"2.0","result":"pong!","id":1}`
-
-Request:
-
-`curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "publish", "params": {"type": "about", "about": "@o8lWpyLeSqV/BJV9pbxFhKpwm6Lw5k+sqexYK+zT9Tc=.ed25519", "name": "solar_glyph", "description": "glyph's experimental solar (rust) node"}, "id":1 }' 127.0.0.1:3030`
-
-Response:
-
-`{"jsonrpc":"2.0","result":{"msg_ref":"%ZwYwLxMHgU8eC43HOziJvYURjZzAzwFk3v5RYS/NbQY=.sha256","seq": 3,"id":1}`
-
-_Note: You might find it easier to save your JSON to file and pass that to `curl` instead._
-
-```
-curl -X POST -H "Content-Type: application/json" --data @publish.json 127.0.0.1:3030
-```
 
 ## License
 

@@ -67,32 +67,33 @@ While running, a solar node can be queried using JSON-RPC over HTTP.
 
 | Method | Parameters | Response | Description |
 | --- | --- | --- | --- |
-| `blocks` | `"<@...=.ed25519>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `blockers` | `"<@...=.ed25519>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `descriptions` | `"<@...=.ed25519>"` | `[(<@...=.ed25519>, <description>)]` | Returns an array of tuples, each containing a public key and description |
-| `self_descriptions` | `"<@...=.ed25519>"` | `[(<@...=.ed25519>, <description>)]` | Returns an array of tuples, each containing a public key and description |
-| `latest_description` | `"<@...=.ed25519>"` | `<description>` | Returns a single description |
-| `latest_self_description` | `"<@...=.ed25519>"` | `<description>` | Returns a single description |
-| `feed` | `"<@...=.ed25519>"` | `[{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }]` | Returns an array of message KVTs (key, value, timestamp) from the local database |
-| `follows` | `"<@...=.ed25519>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `followers` | `"<@...=.ed25519>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `is_following` | `{ "peer_a": "<@...=.ed25519>", "peer_b": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns a boolean |
-| `friends` | `"<@...=.ed25519>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `images` | `"<@...=.ed25519>"` | `[<&...=.sha256>]` | Returns an array of image references |
-| `self_images` | `"<@...=.ed25519>"` | `[<&...=.sha256>]` | Returns an array of image references |
-| `latest_image` | `"<@...=.ed25519>"` | `<&...=.sha256>` | Returns a single image reference |
-| `latest_self_image` | `"<@...=.ed25519>"` | `<&...=.sha256>` | Returns a single image reference |
-| `message` | `"<%...=.sha256>"` | `{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }` | Returns a single message KVT (key, value, timestamp) from the local database |
-| `names` | `"<@...=.ed25519>"` | `[<name>]` | Returns an array of names |
-| `self_names` | `"<@...=.ed25519>"` | `[<name>]` | Returns an array of names |
-| `latest_name` | `"<@...=.ed25519>"` | `<name>` | Returns a single name |
-| `latest_self_name` | `"<@...=.ed25519>"` | `<name>` | Returns a single name |
+| `blocks` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
+| `blockers` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
+| `descriptions` | `{ "pub_key": "<@...=.ed25519>" }` | `[(<@...=.ed25519>, <description>)]` | Returns an array of tuples, each containing a public key and a description |
+| `self_descriptions` | `{ "pub_key": "<@...=.ed25519>" }` | `[<description>]` | Returns an array of descriptions |
+| `latest_description` | `{ "pub_key": "<@...=.ed25519>" }` | `<description>` | Returns a single description |
+| `latest_self_description` | `{ "pub_key": "<@...=.ed25519>" }` | `<description>` | Returns a single description |
+| `feed` | `{ "pub_key": "<@...=.ed25519>" }` | `[{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }]` | Returns an array of message KVTs (key, value, timestamp) from the local database |
+| `follows` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
+| `followers` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
+| `is_following` | `{ "peer_a": "<@...=.ed25519>", "peer_b": "<@...=.ed25519>" }` | `<bool>` | Returns a boolean |
+| `friends` | `{ "pub_key": "<@...=.ed25519>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
+| `images` | `{ "pub_key": "<@...=.ed25519>" }` | `[(<@...=.ed25519>, <&...=.sha256>)]` | Returns an array of tuples, each containing a public key and an image reference |
+| `self_images` | `{ "pub_key": "<@...=.ed25519>" }` | `[<&...=.sha256>]` | Returns an array of image references |
+| `latest_image` | `{ "pub_key": "<@...=.ed25519>" }` | `<&...=.sha256>` | Returns a single image reference |
+| `latest_self_image` | `{ "pub_key": "<@...=.ed25519>" }` | `<&...=.sha256>` | Returns a single image reference |
+| `message` | `{ "msg_ref": "<%...=.sha256>" }` | `{ "key": "<%...=.sha256>", "value": <value>, "timestamp": <timestamp>, "rts": null }` | Returns a single message KVT (key, value, timestamp) from the local database |
+| `names` | `{ "pub_key": "<@...=.ed25519>" }` | `[<name>]` | Returns an array of names |
+| `self_names` | `{ "pub_key": "<@...=.ed25519>" }` | `[<name>]` | Returns an array of names |
+| `latest_name` | `{ "pub_key": "<@...=.ed25519>" }` | `<name>` | Returns a single name |
+| `latest_self_name` | `{ "pub_key": "<@...=.ed25519>" }` | `<name>` | Returns a single name |
 | `peers` | | `[{ "pub_key": "<@...=.ed25519>", "seq_num": <int> }` | Returns an array of public key and latest sequence number for each peer in the local database |
 | `ping` | | `pong!` | Responds if the JSON-RPC server is running |
-| `publish` | `<content>` | `{ "msg_ref": "<%...=.sha256>", "seq_num": <int> }` | Publishes a message and returns the reference (message hash) and sequence number |
-| `subscribers` | `"<channel>"` | `[<@...=.ed25519>]` | Returns an array of public keys |
-| `subscriptions` | `"<@...=.ed25519>"` | `[<channel>]` | Returns an array of channel names |
+| `publish` | `{ "msg": {<content>} }` | `("<%...=.sha256>", <int>)` | Returns a tuple of the reference (message hash) and sequence number |
+| `subscribers` | `{ "channel": "<channel_name>" }` | `[<@...=.ed25519>]` | Returns an array of public keys |
+| `subscriptions` | `{ "pub_key": "<@...=.ed25519>" }` | `[<channel>]` | Returns an array of channel names |
 | `whoami` | | `<@...=.ed25519>` | Returns the public key of the local node |
+
 
 ### Examples
 
@@ -108,7 +109,7 @@ Response:
 
 Request:
 
-`curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "publish", "params": {"type": "about", "about": "@o8lWpyLeSqV/BJV9pbxFhKpwm6Lw5k+sqexYK+zT9Tc=.ed25519", "name": "solar_glyph", "description": "glyph's experimental solar (rust) node"}, "id":1 }' 127.0.0.1:3030`
+`curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "publish", "params": {"msg": {"type": "about", "about": "@o8lWpyLeSqV/BJV9pbxFhKpwm6Lw5k+sqexYK+zT9Tc=.ed25519", "name": "solar_glyph", "description": "glyph's experimental solar (rust) node"} }, "id":1 }' 127.0.0.1:3030`
 
 Response:
 

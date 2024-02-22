@@ -1,5 +1,4 @@
 use anyhow::Result;
-// TODO: Should we rather be using a custom kuska type?
 use serde_json::Value;
 
 #[jsonrpc_client::api]
@@ -47,6 +46,8 @@ pub trait SolarClient {
     async fn peers(&self) -> Vec<(String, u64)>;
 
     async fn ping(&self) -> String;
+
+    async fn publish(&self, msg: Value) -> (String, u64);
 
     async fn subscribers(&self, channel: &str) -> Vec<String>;
 

@@ -26,6 +26,12 @@ struct IsFollowing {
     peer_b: String,
 }
 
+/// The contents of a raw message (of any supported type).
+#[derive(Debug, Deserialize)]
+struct Msg {
+    msg: TypedMessage,
+}
+
 /// Message reference containing the key (sha256 hash) of a message.
 /// Used to parse the key from the parameters supplied to the `message`
 /// endpoint.
@@ -474,8 +480,9 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
     // Returns the key (hash) and sequence number of the published message.
     rpc_module.register_method("publish", move |params: Params, _| {
         task::block_on(async {
-            // Parse the parameter containing the post content.
-            let post_content: TypedMessage = params.parse()?;
+            // Parse the parameter containing the message content.
+            let msg_object: Msg = params.parse()?;
+            let msg_content: TypedMessage = msg_object.msg;
 
             // Open the primary KV database for writing.
             let db = KV_STORE.write().await;
@@ -484,8 +491,8 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
             // Return `None` if no messages have yet been published on the feed.
             let last_msg = db.get_latest_msg_val(&server_id.id)?;
 
-            // Instantiate and cryptographically-sign a new message using `post`.
-            let msg = Message::sign(last_msg.as_ref(), &server_id, json!(post_content))
+            // Instantiate and cryptographically-sign a new message.
+            let msg = Message::sign(last_msg.as_ref(), &server_id, json!(msg_content))
                 .map_err(Error::Validation)?;
 
             // Append the signed message to the feed.
@@ -497,7 +504,8 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
                 seq
             );
 
-            let response = json![{ "msg_ref": msg.id().to_string(), "seq_num": seq }];
+            // Return a tuple of message reference and sequence number.
+            let response = json!((msg.id().to_string(), seq));
 
             Ok::<Value, JsonRpcError>(response)
         })

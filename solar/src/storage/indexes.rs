@@ -299,27 +299,31 @@ impl Indexes {
     }
 
     /// Return all indexed self-assigned descriptions for the given public key.
-    pub fn get_self_assigned_descriptions(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
-        let mut descriptions = self.get_descriptions(ssb_id)?;
-        descriptions.retain(|(author, _description)| author == ssb_id);
+    pub fn get_self_assigned_descriptions(&self, ssb_id: &str) -> Result<Vec<String>> {
+        let descriptions = self
+            .get_descriptions(ssb_id)?
+            .into_iter()
+            .filter(|(author, _description)| author == ssb_id)
+            .map(|(_ssb_id, description)| description)
+            .collect();
 
         Ok(descriptions)
     }
 
     /// Return the most recently indexed description for the given public key.
-    pub fn get_latest_description(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
-        let descriptions = self.get_descriptions(ssb_id)?;
-        let description = descriptions.last().cloned();
+    pub fn get_latest_description(&self, ssb_id: &str) -> Result<Option<String>> {
+        let description = self
+            .get_descriptions(ssb_id)?
+            .last()
+            .map(|(_ssb_id, description)| description)
+            .cloned();
 
         Ok(description)
     }
 
     /// Return the most recently indexed self-assigned description for the given
     /// public key.
-    pub fn get_latest_self_assigned_description(
-        &self,
-        ssb_id: &str,
-    ) -> Result<Option<(String, String)>> {
+    pub fn get_latest_self_assigned_description(&self, ssb_id: &str) -> Result<Option<String>> {
         let self_descriptions = self.get_self_assigned_descriptions(ssb_id)?;
         let description = self_descriptions.last().cloned();
 
@@ -460,9 +464,13 @@ impl Indexes {
 
     /// Return all indexed self-assigned image references for the given public
     /// key.
-    pub fn get_self_assigned_images(&self, ssb_id: &str) -> Result<Vec<(String, String)>> {
-        let mut images = self.get_images(ssb_id)?;
-        images.retain(|(author, _image)| author == ssb_id);
+    pub fn get_self_assigned_images(&self, ssb_id: &str) -> Result<Vec<String>> {
+        let images = self
+            .get_images(ssb_id)?
+            .into_iter()
+            .filter(|(author, _image)| author == ssb_id)
+            .map(|(_ssb_id, image)| image)
+            .collect();
 
         Ok(images)
     }
@@ -478,7 +486,7 @@ impl Indexes {
 
     /// Return the most recently indexed self-assigned image reference for the
     /// given public key.
-    pub fn get_latest_self_assigned_image(&self, ssb_id: &str) -> Result<Option<(String, String)>> {
+    pub fn get_latest_self_assigned_image(&self, ssb_id: &str) -> Result<Option<String>> {
         let images = self.get_self_assigned_images(ssb_id)?;
         let image = images.last().cloned();
 
@@ -595,7 +603,7 @@ mod test {
 
             indexes.index_msg(&keypair.id, first_msg)?;
 
-            if let Some((_author, description)) = indexes.get_latest_description(&keypair.id)? {
+            if let Some(description) = indexes.get_latest_description(&keypair.id)? {
                 assert_eq!(description, first_description);
             }
 
@@ -632,9 +640,7 @@ mod test {
                 assert_eq!(lastest_name, second_name);
             }
 
-            if let Some((_author, latest_description)) =
-                indexes.get_latest_description(&keypair.id)?
-            {
+            if let Some(latest_description) = indexes.get_latest_description(&keypair.id)? {
                 assert_eq!(latest_description, second_description);
             }
         }

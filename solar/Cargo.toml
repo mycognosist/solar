@@ -1,6 +1,6 @@
 [package]
 name = "solar"
-version = "0.3.4"
+version = "0.4.0"
 authors = ["adria0 <adria@codecontext.io>", "glyph <glyph@mycelial.technology>"]
 description = "Embeddable Scuttlebutt network node"
 edition = "2018"
@@ -14,7 +14,7 @@ async-std = { version = "1", features=["attributes", "tokio1"] }
 async-trait = "0.1"
 base64 = "0.13"
 futures = "0.3"
-hex = "0.4.0"
+hex = "0.4"
 jsonrpsee = { version = "0.18.2", features = ["server"] }
 kuska-sodiumoxide = "0.2.5-0"
 kuska-ssb = { git =  "https://github.com/Kuska-ssb/ssb", branch = "master" }
@@ -27,7 +27,7 @@ serde_cbor = "0.11"
 serde_json = { version = "1", features=["preserve_order", "arbitrary_precision"] }
 sha2 = "0.10"
 sled = "0.34"
-toml = "0.7.4"
+toml = "0.7"
 url = "2.3"
 xdg = "2.4"
 

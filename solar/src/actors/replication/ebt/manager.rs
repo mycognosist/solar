@@ -510,7 +510,7 @@ impl EbtManager {
         //
         // This indicates that the local peer is acting as the session
         // requester.
-        if self.sent_clocks.get(&connection_id).is_none() {
+        if !self.sent_clocks.contains_key(&connection_id) {
             let local_clock = self.local_clock.to_owned();
             ch_broker
                 .send(BrokerEvent::new(

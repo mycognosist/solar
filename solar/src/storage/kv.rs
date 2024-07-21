@@ -432,6 +432,68 @@ mod test {
         Ok(())
     }
 
+    #[async_std::test]
+    async fn test_peer_range_query() -> Result<()> {
+        let (keypair, kv) = initialise_keypair_and_kv()?;
+        // Get a list of all replicated peers and their latest sequence
+        // numbers. This list is expected to be empty because we never
+        // added any data to the database.
+        let peers = kv.get_peers().await?;
+        assert_eq!(peers.len(), 0);
+
+        // Create a post-type message.
+        let msg_content = TypedMessage::Post {
+            text: "A solar flare is an intense localized eruption of electromagnetic radiation."
+                .to_string(),
+            mentions: None,
+        };
+
+        // Lookup the value of the previous message. This will be `None`.
+        let last_msg = kv.get_latest_msg_val(&keypair.id)?;
+
+        // Sign the message content using the temporary keypair and value of
+        // the previous message.
+        let msg = MessageValue::sign(last_msg.as_ref(), &keypair, json!(msg_content))?;
+
+        // Append the signed message to the feed. Returns the sequence number
+        // of the appended message.
+        let _ = kv.append_feed(msg).await?;
+
+        // now that we have added a message, we should have one peer,
+        // which is the keypair we used to sign the message.
+        let peers = kv.get_peers().await?;
+        assert_eq!(peers.len(), 1);
+        assert_eq!(&peers.get(0).unwrap().0, &keypair.id);
+
+        let db = kv.db.as_ref().ok_or(Error::OptionIsNone)?;
+
+        // insert one key with PREFIX_PEER+1 as the first byte.
+        db.insert(
+            &vec![PREFIX_PEER + 1u8],
+            "this should not show up in the peers list because it's after the peers range"
+                .as_bytes()
+                .to_vec(),
+        )?;
+
+        // this should not have changed the peers list
+        let peers = kv.get_peers().await?;
+        assert_eq!(peers.len(), 1);
+
+        // do the same for PREFIX_PEER-1
+        db.insert(
+            &vec![PREFIX_PEER - 1u8],
+            "this should not show up in the peers list because it's before the peers range"
+                .as_bytes()
+                .to_vec(),
+        )?;
+
+        // this should not have changed the peers list
+        let peers = kv.get_peers().await?;
+        assert_eq!(peers.len(), 1);
+
+        Ok(())
+    }
+
     // In reality this test covers more than just the append method.
     // It tests multiple methods exposed by the kv database.
     // The main reason for combining the tests is the cost of setting up

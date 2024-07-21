@@ -226,8 +226,9 @@ impl KvStorage {
         let mut peers = Vec::new();
 
         // Use the generic peer prefix to return an iterator over all peers.
-        let scan_peer_key: &[u8] = &[PREFIX_PEER];
-        for peer in db.range(scan_peer_key..) {
+        let scan_peer_key_start: &[u8] = &[PREFIX_PEER];
+        let scan_peer_key_end: &[u8] = &[PREFIX_PEER + 1];
+        for peer in db.range(scan_peer_key_start..scan_peer_key_end) {
             let (peer_key, _) = peer?;
             // Drop the prefix byte and convert the remaining bytes to
             // a string.

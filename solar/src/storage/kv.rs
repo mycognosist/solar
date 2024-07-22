@@ -136,8 +136,9 @@ impl KvStorage {
         let mut list = Vec::new();
 
         let db = self.db.as_ref().ok_or(Error::OptionIsNone)?;
-        let scan_key: &[u8] = &[PREFIX_BLOB];
-        for item in db.range(scan_key..) {
+        let scan_key_start: &[u8] = &[PREFIX_BLOB];
+        let scan_key_end: &[u8] = &[PREFIX_BLOB + 1];
+        for item in db.range(scan_key_start..scan_key_end) {
             let (k, v) = item?;
             let blob: BlobStatus = serde_cbor::from_slice(&v)?;
             if !blob.retrieved {

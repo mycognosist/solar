@@ -580,6 +580,53 @@ mod test {
         Ok(())
     }
 
+    #[async_std::test]
+    async fn test_blobs_range_query_when_peers_exist() -> Result<()> {
+        let (keypair, kv) = initialise_keypair_and_kv()?;
+        kv.set_blob(
+            "b1",
+            &BlobStatus {
+                retrieved: false,
+                users: ["u2".to_string()].to_vec(),
+            },
+        )?;
+
+        assert_eq!(kv.get_peers().await?.len(), 0);
+
+        assert_eq!(kv.get_pending_blobs().unwrap(), vec!["b1".to_string()]);
+
+        println!("Inserting a new message and thus peer");
+        let msg_content = TypedMessage::Post {
+            text: "A solar flare is an intense localized eruption of electromagnetic radiation."
+                .to_string(),
+            mentions: None,
+        };
+        // Passing None as the last message since we start from an empty feed
+        let msg = MessageValue::sign(None, &keypair, json!(msg_content))?;
+        let _ = kv.append_feed(msg).await?;
+
+        // now that we have added a message, we should have one peer,
+        // which is the keypair we used to sign the message.
+        let peers = kv.get_peers().await?;
+        assert_eq!(peers.len(), 1);
+
+        println!("Inserting a second blob");
+        kv.set_blob(
+            "b2",
+            &BlobStatus {
+                retrieved: false,
+                users: ["u7".to_string()].to_vec(),
+            },
+        )?;
+
+        assert_eq!(
+            kv.get_pending_blobs()?,
+            vec!["b1".to_string(), "b2".to_string()]
+        );
+
+        Ok(())
+    }
+
     #[test]
     fn test_blobs() -> Result<()> {
         let kv = open_temporary_kv()?;

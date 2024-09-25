@@ -4,6 +4,7 @@ mod actors;
 mod broker;
 mod config;
 mod error;
+mod invite_manager;
 mod node;
 // TODO: `pub` can be removed once blob-related functions are used.
 mod secret_config;

@@ -31,6 +31,10 @@ pub enum Error {
     Indexes,
     /// Validation error; invalid message sequence number.
     InvalidSequence,
+    // TODO: See if this needs to be changed...
+    // Also, add useful messages (why did it fail?).
+    InviteCreate,
+    InviteUse,
     /// io::Error.
     Io(io::Error),
     /// JSON RPC error.
@@ -88,6 +92,8 @@ impl fmt::Display for Error {
                 f,
                 "Validation error: message contains incorrect sequence number"
             ),
+            Error::InviteCreate => write!(f, "Invite create error"),
+            Error::InviteUse => write!(f, "Invite use error"),
             Error::Io(err) => write!(f, "I/O error: {err}"),
             Error::JsonRpc(err) => write!(f, "JSON-RPC error: {err}"),
             Error::LanDiscovery(err) => write!(f, "LAN UDP discovery error: {err}"),

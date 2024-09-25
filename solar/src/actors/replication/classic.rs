@@ -16,8 +16,8 @@ use log::{error, info, trace, warn};
 use crate::{
     actors::{
         muxrpc::{
-            BlobsGetHandler, BlobsWantsHandler, GetHandler, HistoryStreamHandler, RpcHandler,
-            RpcInput, WhoAmIHandler,
+            BlobsGetHandler, BlobsWantsHandler, GetHandler, HistoryStreamHandler, InviteHandler,
+            RpcHandler, RpcInput, WhoAmIHandler,
         },
         network::{
             connection::ConnectionData,
@@ -146,6 +146,7 @@ async fn replication_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send
     let mut get_handler = GetHandler::default();
     let mut blobs_get_handler = BlobsGetHandler::default();
     let mut blobs_wants_handler = BlobsWantsHandler::default();
+    let mut invite_handler = InviteHandler::default();
 
     let mut handlers: Vec<&mut dyn RpcHandler<W>> = vec![
         &mut history_stream_handler,
@@ -153,6 +154,7 @@ async fn replication_loop<R: Read + Unpin + Send + Sync, W: Write + Unpin + Send
         &mut get_handler,
         &mut blobs_get_handler,
         &mut blobs_wants_handler,
+        &mut invite_handler,
     ];
 
     // Create channel to send messages to broker.

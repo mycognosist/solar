@@ -4,6 +4,7 @@ mod ebt;
 mod get;
 mod handler;
 mod history_stream;
+mod invite;
 mod whoami;
 
 /// The unique identifier of a MUXRPC request.
@@ -15,4 +16,5 @@ pub use ebt::EbtReplicateHandler;
 pub use get::GetHandler;
 pub use handler::{RpcHandler, RpcInput};
 pub use history_stream::HistoryStreamHandler;
+pub use invite::InviteHandler;
 pub use whoami::WhoAmIHandler;

@@ -4,3 +4,5 @@ go_sbot_benchmarks
 /releases
 /cmds
 /logs
+deploy.sh
+.idea

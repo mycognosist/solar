@@ -21,6 +21,12 @@ async fn main() -> Result<()> {
         "text": TEXT,
     });
 
+    let post = json!({
+        "type": "contact",
+        "contact": "@5Pt3dKy2HTJ0mWuS78oIiklIX0gBz6BTfEnXsbvke9c=.ed25519",
+        "following": true
+    });
+
     let msg_ref_and_seq_num = client.publish(post).await?;
     println!("{:?}", msg_ref_and_seq_num);
     // ("%J0k3hbXE6CjoA2yFpUsy+A1K+GRcTc5Eh6LH7OuzzUE=.sha256", 231)

@@ -2,7 +2,7 @@ use anyhow::Result;
 use solar_client::{Client, SolarClient};
 
 const SERVER_ADDR: &str = "http://127.0.0.1:3030";
-const MSG_REF: &str = "%RCb++/ZhqV1lJNIcoNrk4yM3AfBobT7u8seObZgcEbA=.sha256";
+const MSG_REF: &str = "%jN6hYC5CgJGYnmZv8GX8JuTyxVRzs2JE5OkfAqwAMN0=.sha256";
 
 #[tokio::main]
 async fn main() -> Result<()> {

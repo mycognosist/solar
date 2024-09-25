@@ -54,6 +54,8 @@ pub trait SolarClient {
     async fn subscriptions(&self, pub_key: &str) -> Vec<String>;
 
     async fn whoami(&self) -> String;
+
+    async fn create_invite(&self, num_uses: i32) -> String;
 }
 
 #[jsonrpc_client::implement(SolarClient)]

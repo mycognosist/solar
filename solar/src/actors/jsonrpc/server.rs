@@ -46,6 +46,12 @@ struct PubKey {
     pub_key: String,
 }
 
+/// Used to parse Args for invite creation endpiont
+#[derive(Debug, Deserialize)]
+struct InviteCreationRequest {
+    num_uses: i32,
+}
+
 /// Register the JSON-RPC server endpoint, define the JSON-RPC methods
 /// and spawn the server.
 ///
@@ -464,6 +470,20 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
             let db = KV_STORE.read().await;
             let peers = db.get_peers().await?;
             let response = json!(peers);
+
+            Ok::<Value, JsonRpcError>(response)
+        })
+    })?;
+
+    // Create an invite code with the given number of uses.
+    //
+    // Returns a string of the new invite code.
+    rpc_module.register_method("create_invite", move |params: Params, _| {
+        task::block_on(async {
+            let a: InviteCreationRequest = params.parse()?;
+            let num_uses = a.num_uses;
+
+            let response = json!(format!("generated new invite code with {} uses", num_uses));
 
             Ok::<Value, JsonRpcError>(response)
         })

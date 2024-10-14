@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::{broker::*, error::Error, node::KV_STORE, Result};
+use crate::node::{BLOB_STORE, INVITE_MANAGER};
 
 /// The name of a channel.
 #[derive(Debug, Deserialize)]
@@ -49,7 +50,7 @@ struct PubKey {
 /// Used to parse Args for invite creation endpiont
 #[derive(Debug, Deserialize)]
 struct InviteCreationRequest {
-    num_uses: i32,
+    num_uses: u16,
 }
 
 /// Register the JSON-RPC server endpoint, define the JSON-RPC methods
@@ -483,7 +484,9 @@ pub async fn actor(server_id: OwnedIdentity, server_addr: SocketAddr) -> Result<
             let a: InviteCreationRequest = params.parse()?;
             let num_uses = a.num_uses;
 
-            let response = json!(format!("generated new invite code with {} uses", num_uses));
+            let mut invite_manager = INVITE_MANAGER.write().await;
+            let new_invite = invite_manager.create_invite(num_uses)?;
+            let response = json!(format!("generated new invite code {} with {} uses", new_invite, num_uses));
 
             Ok::<Value, JsonRpcError>(response)
         })

@@ -12,7 +12,9 @@ use crate::{
     broker::ChBrokerSend,
     node::KV_STORE,
     Result,
+    error::Error
 };
+use crate::node::INVITE_MANAGER;
 
 pub struct InviteHandler<W>
 where
@@ -72,20 +74,38 @@ where
         // This will contain the invite code.
         let args: Vec<String> = serde_json::from_value(req.args.clone())?;
 
-        // TODO:
         // Parse the public key and secret from the invite code (ignore the hostname and port).
-        /*
-        match INVITE_MANAGER.use_invite(secret)? {
+        // `one.butt.nz:8008:@...=.ed25519~<base64 invite secret key seed>=
+        let delimiter = ".ed25519~";
+
+        let parsed_invite_secret = match args[0].split_once(delimiter) {
+            Some((part1, invite_secret)) => {
+                println!("Part 1: {}", part1);
+                println!("Part 2: {}", invite_secret);
+                Ok(invite_secret)
+            }
+            None => {
+                println!("Delimiter not found in the string.");
+                Err(Error::InviteUse)
+            }
+        };
+        let invite_secret = parsed_invite_secret.expect("invalid format of invite string");
+
+
+        // then use the invite
+        let mut invite_manager = INVITE_MANAGER.write().await;
+        let result = invite_manager.use_invite(invite_secret);
+        match result {
             // We need to send a success or error response to the remote peer.
-            //
             // TODO: kuska needs api.invite_res_send(..).
-            Ok(_) => api.invite_res_send(...).await?,
+            Ok(_) =>   {
+                api.whoami_res_send(req_no,"invite accepted".to_string()).await?;
+            }
             Err(err) => {
                 let msg = format!("{err}");
                 api.rpc().send_error(req_no, req.rpc_type, &msg).await?
             }
         }
-        */
 
         Ok(true)
     }

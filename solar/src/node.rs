@@ -17,6 +17,7 @@ use crate::{
     broker::*,
     config::ApplicationConfig,
     storage::{blob::BlobStorage, kv::KvStorage},
+    invite_manager::InviteManager,
     Result,
 };
 
@@ -26,6 +27,9 @@ pub static KV_STORE: Lazy<Arc<RwLock<KvStorage>>> =
 // Instantiate the blob store.
 pub static BLOB_STORE: Lazy<Arc<RwLock<BlobStorage>>> =
     Lazy::new(|| Arc::new(RwLock::new(BlobStorage::default())));
+// Instantiate the invite manager
+pub static INVITE_MANAGER: Lazy<Arc<RwLock<InviteManager>>> =
+    Lazy::new(|| Arc::new(RwLock::new(InviteManager::default())));
 
 /// Main runtime managing the solar node process.
 pub struct Node;
